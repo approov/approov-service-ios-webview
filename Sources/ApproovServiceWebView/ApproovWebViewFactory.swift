@@ -49,8 +49,15 @@ public enum ApproovWebViewFactory {
         coordinator: ApproovWebViewCoordinator? = nil,
         baseWebView: WKWebView? = nil
     ) -> WKWebView {
+        let logger = ApproovWebViewLogger(configuration: configuration)
         let coordinator = coordinator ?? makeCoordinator(configuration: configuration)
         let webView = baseWebView ?? makeBaseWebView()
+        logger.debug(
+            """
+            Preparing Approov web view using \(baseWebView == nil ? "a new" : "an existing") \
+            WKWebView instance
+            """
+        )
 
         installBridgeIfNeeded(
             on: webView,
@@ -59,7 +66,10 @@ public enum ApproovWebViewFactory {
         )
 
         if let content {
+            logger.debug("Loading initial content into protected web view: \(content.logDescription)")
             load(content, into: webView)
+        } else {
+            logger.debug("Protected web view created without initial content")
         }
 
         return webView
@@ -78,7 +88,9 @@ public enum ApproovWebViewFactory {
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator? = nil
     ) -> WKWebView {
+        let logger = ApproovWebViewLogger(configuration: configuration)
         let coordinator = coordinator ?? makeCoordinator(configuration: configuration)
+        logger.debug("Installing Approov bridge on existing WKWebView")
 
         installBridgeIfNeeded(
             on: webView,
@@ -111,6 +123,7 @@ public enum ApproovWebViewFactory {
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator
     ) {
+        let logger = ApproovWebViewLogger(configuration: configuration)
         let bridgeScriptSource =
             ApproovServiceWebViewCore.ApproovWebViewJavaScriptBridge.scriptSource(
                 handlerName: configuration.bridgeHandlerName,
@@ -118,6 +131,7 @@ public enum ApproovWebViewFactory {
             )
 
         if let installation = installation(for: webView) {
+            logger.debug("Approov bridge already installed on this WKWebView; reusing existing installation")
             assert(
                 installation.bridgeScriptSource == bridgeScriptSource,
                 """
@@ -137,6 +151,12 @@ public enum ApproovWebViewFactory {
         )
 
         let userContentController = webView.configuration.userContentController
+        logger.debug(
+            """
+            Installing bridge handler '\(configuration.bridgeHandlerName)' with \
+            \(configuration.protectedEndpoints.count) protected endpoint(s)
+            """
+        )
 
         // Inject the bridge before any page code runs so page scripts cannot
         // race Fetch, XHR, or form submission before the native wrappers exist.

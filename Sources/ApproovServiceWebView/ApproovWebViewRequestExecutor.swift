@@ -15,6 +15,7 @@ final actor ApproovWebViewRequestExecutor {
     private let cookieBridge: ApproovWebViewCookieBridge
     private let cookieStorage = HTTPCookieStorage()
     private let urlSession: ApproovURLSession
+    private let logger: ApproovWebViewLogger
     private let scopeID = UUID().uuidString
     private var didInitializeApproov = false
 
@@ -24,6 +25,7 @@ final actor ApproovWebViewRequestExecutor {
     ) {
         self.configuration = configuration
         self.cookieBridge = cookieBridge
+        self.logger = ApproovWebViewLogger(configuration: configuration)
 
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.httpCookieStorage = cookieStorage
@@ -32,12 +34,20 @@ final actor ApproovWebViewRequestExecutor {
         sessionConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
         sessionConfiguration.urlCache = nil
         self.urlSession = ApproovURLSession(configuration: sessionConfiguration)
+        logger.debug("Created native request executor with scope \(scopeID)")
     }
 
     /// Executes a page-originated request natively.
     func execute(_ proxyRequest: ApproovWebViewProxyRequest) async throws -> ApproovWebViewExecutionResult {
+        logger.debug("Starting native execution for \(proxyRequest.logDescription)")
         let requestContext = try makeRequestContext(from: proxyRequest)
         guard configuration.isProtectedEndpoint(requestContext.requestURL) else {
+            logger.error(
+                """
+                Rejecting unprotected WebView request routed into native code: \
+                \(ApproovWebViewLogger.redactedURLForLog(requestContext.requestURL))
+                """
+            )
             throw ApproovWebViewBridgeError.requestNotProtected(
                 requestContext.requestURL.absoluteString
             )
@@ -55,6 +65,13 @@ final actor ApproovWebViewRequestExecutor {
         }
 
         await synchronizeCookiesBackIntoWebView()
+        logger.debug(
+            """
+            Native execution completed with status \(httpResponse.statusCode) \
+            for \(ApproovWebViewLogger.redactedURLForLog(httpResponse.url ?? requestContext.requestURL)) \
+            and \(data.count) bytes
+            """
+        )
 
         let finalURL = httpResponse.url ?? requestContext.requestURL
         let proxyResponse = ApproovWebViewProxyResponse(
@@ -138,6 +155,7 @@ final actor ApproovWebViewRequestExecutor {
     /// Copies cookies from WebKit into native storage before each request.
     private func synchronizeCookiesIntoNativeStorage() async throws {
         let webCookies = await cookieBridge.allCookies()
+        logger.debug("Synchronizing \(webCookies.count) cookies from WebKit into native storage")
 
         for cookie in cookieStorage.cookies ?? [] {
             cookieStorage.deleteCookie(cookie)
@@ -150,7 +168,9 @@ final actor ApproovWebViewRequestExecutor {
 
     /// Pushes cookies written during the native request back into WebKit.
     private func synchronizeCookiesBackIntoWebView() async {
-        await cookieBridge.setCookies(cookieStorage.cookies ?? [])
+        let nativeCookies = cookieStorage.cookies ?? []
+        logger.debug("Synchronizing \(nativeCookies.count) cookies from native storage back into WebKit")
+        await cookieBridge.setCookies(nativeCookies)
     }
 
     /// Applies a `Cookie` header if JavaScript did not supply one already.
@@ -169,6 +189,7 @@ final actor ApproovWebViewRequestExecutor {
     /// Initializes Approov lazily the first time protected traffic is sent.
     private func initializeApproovIfNeeded() throws {
         guard !didInitializeApproov else {
+            logger.debug("Approov already initialized for scope \(scopeID)")
             return
         }
 
@@ -179,6 +200,12 @@ final actor ApproovWebViewRequestExecutor {
             throw ApproovWebViewBridgeError.approovConfigEmpty
         }
 
+        logger.debug(
+            """
+            Initializing Approov for scope \(scopeID) with \
+            \(configuration.protectedEndpoints.count) protected endpoint(s)
+            """
+        )
         ApproovWebViewServiceMutator.installOrUpdateScope(
             scopeID: scopeID,
             configuration: configuration
@@ -190,17 +217,22 @@ final actor ApproovWebViewRequestExecutor {
         )
         if let approovDevelopmentKey = configuration.approovDevelopmentKey,
            !approovDevelopmentKey.isEmpty {
+            logger.debug("Applying Approov development key")
             ApproovService.setDevKey(devKey: approovDevelopmentKey)
         }
+        logger.debug("Running host Approov configuration hook")
         try configuration.configureApproovService()
 
         didInitializeApproov = true
+        logger.debug("Approov initialization completed for scope \(scopeID)")
     }
 
     /// Uses the completion-handler `dataTask(...)` path because the async
     /// convenience APIs are not protected by `ApproovURLSession`.
     private func performPinnedRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
-        try await withCheckedThrowingContinuation { continuation in
+        logger.debug("Executing protected request via ApproovURLSession: \(request.logDescription)")
+        return try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
             let task = urlSession.dataTask(with: request) { data, response, error in
                 if let error {
                     continuation.resume(throwing: error)

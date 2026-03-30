@@ -13,6 +13,7 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
         let protectedEndpoints: [ApproovWebViewProtectedEndpoint]
         let allowRequestsWithoutApproovToken: Bool
         let mutateRequest: @Sendable (URLRequest) -> URLRequest
+        let logger: ApproovWebViewLogger
     }
 
     private static let requestScopeProperty = "ApproovWebViewBridge.ScopeID"
@@ -32,19 +33,29 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
         scopeID: String,
         configuration: ApproovWebViewConfiguration
     ) {
+        let logger = ApproovWebViewLogger(configuration: configuration)
         stateQueue.sync {
             scopePolicies[scopeID] = ScopePolicy(
                 protectedEndpoints: configuration.protectedEndpoints,
                 allowRequestsWithoutApproovToken: configuration.allowRequestsWithoutApproovToken,
-                mutateRequest: configuration.mutateRequest
+                mutateRequest: configuration.mutateRequest,
+                logger: logger
             )
         }
+        logger.debug(
+            """
+            Registered WebView scope \(scopeID) with \
+            \(configuration.protectedEndpoints.count) protected endpoint(s)
+            """
+        )
 
         let currentMutator = ApproovService.getServiceMutator()
         guard !(currentMutator is ApproovWebViewServiceMutator) else {
+            logger.debug("ApproovWebViewServiceMutator already installed")
             return
         }
 
+        logger.debug("Installing ApproovWebViewServiceMutator into ApproovService")
         ApproovService.setServiceMutator(
             ApproovWebViewServiceMutator(baseMutator: currentMutator)
         )
@@ -89,6 +100,13 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
         }
     }
 
+    private static func debugLog(
+        _ message: @autoclosure () -> String,
+        for request: URLRequest
+    ) {
+        scopePolicy(for: request)?.logger.debug(message())
+    }
+
     private func isAllowedWebViewRequest(
         _ request: URLRequest,
         policy: ScopePolicy
@@ -127,6 +145,10 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
     func handleInterceptorShouldProcessRequest(_ request: URLRequest) throws -> Bool {
         if let scopePolicy = Self.scopePolicy(for: request) {
             guard isAllowedWebViewRequest(request, policy: scopePolicy) else {
+                Self.debugLog(
+                    "Skipping request outside WebView protected allowlist: \(request.logDescription)",
+                    for: request
+                )
                 return false
             }
         }
@@ -151,6 +173,12 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
             if canFailOpen {
                 switch error {
                 case .networkingError:
+                    matchingPolicies.first?.logger.debug(
+                        """
+                        Allowing fail-open handling after Approov networking error for \
+                        \(ApproovWebViewLogger.redactedURLForLog(url))
+                        """
+                    )
                     return false
                 default:
                     break
@@ -194,12 +222,16 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
             return processedRequest
         }
 
+        scopePolicy.logger.debug("Applying host request mutation for \(processedRequest.logDescription)")
         return scopePolicy.mutateRequest(processedRequest)
     }
 
     func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool {
         if let scopePolicy = Self.scopePolicy(for: request),
            !isAllowedWebViewRequest(request, policy: scopePolicy) {
+            scopePolicy.logger.debug(
+                "Skipping pinning outside WebView protected allowlist: \(request.logDescription)"
+            )
             return false
         }
 

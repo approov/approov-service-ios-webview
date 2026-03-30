@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 import WebKit
 
 /// Receives JavaScript bridge messages and delegates execution to the actor
@@ -8,21 +7,24 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private let configuration: ApproovWebViewConfiguration
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
-    private let logger: Logger
+    private let logger: ApproovWebViewLogger
     private weak var webView: WKWebView?
     private var executor: ApproovWebViewRequestExecutor?
 
     public init(configuration: ApproovWebViewConfiguration) {
         self.configuration = configuration
-        self.logger = Logger(
-            subsystem: configuration.loggerSubsystem,
-            category: configuration.loggerCategory
-        )
+        self.logger = ApproovWebViewLogger(configuration: configuration)
     }
 
     /// Attaches the concrete `WKWebView` after construction so the
     /// request-execution pipeline can reuse the WebKit cookie store.
     func attach(webView: WKWebView) {
+        logger.debug(
+            """
+            Attaching coordinator to web view with handler '\(configuration.bridgeHandlerName)' \
+            and data store \(webView.configuration.websiteDataStore.isPersistent ? "persistent" : "non-persistent")
+            """
+        )
         self.webView = webView
         self.executor = ApproovWebViewRequestExecutor(
             configuration: configuration,
@@ -38,11 +40,13 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         replyHandler: @escaping (Any?, String?) -> Void
     ) {
         guard let executor else {
+            logger.error("Received bridge message before the native executor was attached")
             replyHandler(nil, "The native bridge is not ready yet.")
             return
         }
 
         guard let bodyDictionary = message.body as? [String: Any] else {
+            logger.error("Received a bridge payload that was not a dictionary")
             replyHandler(nil, "The WebView bridge payload was not a dictionary.")
             return
         }
@@ -56,6 +60,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                 ApproovWebViewProxyRequest.self,
                 from: bodyData
             )
+            logger.debug("Received bridge request: \(proxyRequest.logDescription)")
 
             Task {
                 do {
@@ -63,23 +68,32 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
                     switch executionResult {
                     case let .response(proxyResponse):
+                        logger.debug(
+                            """
+                            Returning response to page: \(proxyResponse.status) \
+                            \(ApproovWebViewLogger.redactedURLForLog(proxyResponse.url)) \
+                            (\(proxyResponse.bodyBase64.count) base64 chars)
+                            """
+                        )
                         let replyObject = try makeReplyObject(from: proxyResponse)
                         replyHandler(replyObject, nil)
 
                     case let .navigation(navigationLoad):
+                        logger.debug(
+                            "Applying simulated navigation for \(navigationLoad.request.logDescription)"
+                        )
                         try await MainActor.run {
                             try applyNavigationLoad(navigationLoad)
                         }
                         replyHandler(["navigationStarted": true], nil)
                     }
                 } catch {
-                    logger.error(
-                        "WebView bridge request failed: \(error.localizedDescription, privacy: .public)"
-                    )
+                    logger.error("WebView bridge request failed: \(error.localizedDescription)")
                     replyHandler(nil, error.localizedDescription)
                 }
             }
         } catch {
+            logger.error("Failed to decode the WebView bridge payload: \(error.localizedDescription)")
             replyHandler(
                 nil,
                 "Failed to decode the WebView request: \(error.localizedDescription)"

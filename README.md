@@ -94,6 +94,7 @@ Unmatched requests continue through WebKit unchanged.
 | `allowRequestsWithoutApproovToken` | Controls fail-open vs fail-closed behavior when Approov cannot produce a token. |
 | `configureApproovService` | Hook for one-time Approov setup beyond the default initialization path. |
 | `mutateRequest` | Native-only request mutation point for secrets or headers that must not be exposed to page JavaScript. |
+| `debugLoggingEnabled` | Enables opt-in debug `OSLog` output for the native bridge lifecycle. |
 | `bridgeHandlerName` | WebKit message handler name used by the injected bridge. |
 
 ## Quick Start
@@ -111,6 +112,7 @@ struct ProtectedWebExperience: View {
                 pathPrefix: "/v1/private"
             )
         ],
+        debugLoggingEnabled: true,
         approovDevelopmentKey: "<your-development-key>",
         mutateRequest: { request in
             var request = request
@@ -201,6 +203,20 @@ webView.load(
 > If you attach Approov to an existing `WKWebView`, do it before the first
 > protected page load, or reload after installation. The bridge is injected at
 > document start and cannot retrofit a page that already finished loading.
+
+## Debug Logging
+
+Set `debugLoggingEnabled: true` in `ApproovWebViewConfiguration` to emit
+debug-level `OSLog` entries for:
+
+- bridge installation and reuse
+- request receipt and native routing
+- cookie synchronization boundaries
+- lazy Approov initialization
+- protected request execution and response handling
+
+The debug logs intentionally avoid request bodies, cookie values, token values,
+and URL query strings.
 
 ## Operational Notes
 

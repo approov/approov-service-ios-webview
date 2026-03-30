@@ -101,6 +101,9 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// mutated as part of the `ApproovURLSession` pipeline.
     public let mutateRequest: @Sendable (URLRequest) -> URLRequest
 
+    /// Enables opt-in debug logging for the native bridge lifecycle.
+    public let debugLoggingEnabled: Bool
+
     /// Logging metadata used by `OSLog`.
     public let loggerSubsystem: String
     public let loggerCategory: String
@@ -115,6 +118,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         allowRequestsWithoutApproovToken: Bool = false,
         configureApproovService: @escaping @Sendable () throws -> Void = {},
         mutateRequest: @escaping @Sendable (URLRequest) -> URLRequest = { $0 },
+        debugLoggingEnabled: Bool = false,
         loggerSubsystem: String = Bundle.main.bundleIdentifier ?? "ApproovWebView",
         loggerCategory: String = "ApproovWebViewBridge"
     ) {
@@ -127,6 +131,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         self.allowRequestsWithoutApproovToken = allowRequestsWithoutApproovToken
         self.configureApproovService = configureApproovService
         self.mutateRequest = mutateRequest
+        self.debugLoggingEnabled = debugLoggingEnabled
         self.loggerSubsystem = loggerSubsystem
         self.loggerCategory = loggerCategory
     }
