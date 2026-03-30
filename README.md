@@ -4,11 +4,22 @@
 
 ## Installation
 
-Add the package to your app. Inside this repo, the sample app consumes it as a
-local package:
+Add the package to your app from GitHub with Swift Package Manager.
+
+In Xcode:
+
+1. Open your project.
+2. Go to `File` -> `Add Package Dependencies...`
+3. Enter `https://github.com/approov/approov-service-ios-webview.git`
+4. Choose the version or branch you want to use.
+
+If you are declaring dependencies in `Package.swift`, add:
 
 ```swift
-.package(path: "../approov-service-ios-webview")
+.package(
+    url: "https://github.com/approov/approov-service-ios-webview.git",
+    branch: "main"
+)
 ```
 
 Then depend on the `ApproovServiceWebView` product and import it:
