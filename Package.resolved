@@ -1,0 +1,33 @@
+{
+  "originHash" : "21ca0cc1326297312d77d38fd075f309080df60d59b42b3f3b258e9748f9172d",
+  "pins" : [
+    {
+      "identity" : "approov-ios-sdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/approov/approov-ios-sdk.git",
+      "state" : {
+        "revision" : "ddeee49a8116df7e48daddbe2eebcdacf642eab8",
+        "version" : "3.5.3"
+      }
+    },
+    {
+      "identity" : "approov-service-urlsession",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/approov/approov-service-urlsession.git",
+      "state" : {
+        "revision" : "840cb8de753367c18862a486e610eee3cba5c19a",
+        "version" : "3.5.6"
+      }
+    },
+    {
+      "identity" : "swift-http-structured-headers",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-http-structured-headers.git",
+      "state" : {
+        "revision" : "76d7627bd88b47bf5a0f8497dd244885960dde0b",
+        "version" : "1.6.0"
+      }
+    }
+  ],
+  "version" : 3
+}
