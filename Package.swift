@@ -47,7 +47,10 @@ let package = Package(
         ),
         .testTarget(
             name: "ApproovServiceWebViewTests",
-            dependencies: ["ApproovServiceWebViewCore"],
+            dependencies: [
+                "ApproovServiceWebView",
+                "ApproovServiceWebViewCore"
+            ],
             path: "Tests/ApproovServiceWebViewTests"
         )
     ]

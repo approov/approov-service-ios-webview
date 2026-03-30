@@ -62,6 +62,7 @@ import ApproovServiceWebView
 | --- | --- |
 | `ApproovWebView` | SwiftUI host for a protected `WKWebView`. |
 | `ApproovWebViewController` | UIKit host for the same bridge and request pipeline. |
+| `ApproovWebViewFactory` | Low-level API for creating or installing an Approov bridge on a raw `WKWebView`. |
 | `ApproovWebViewConfiguration` | Main integration surface for Approov setup, endpoint allowlisting, token header settings, fail-open policy, and native request mutation. |
 | `ApproovWebViewProtectedEndpoint` | Scheme, host, and path-prefix matcher for protected traffic. |
 | `ApproovWebViewContent` | Initial content source for the web view: request, HTML string, or file URL. |
@@ -140,11 +141,74 @@ let controller = ApproovWebViewController(
 )
 ```
 
+## Raw WKWebView Integration
+
+Use `ApproovWebViewFactory` when your app wants the protected `WKWebView`
+instance directly instead of going through the SwiftUI or UIKit host wrappers.
+
+### Create a Web View and Load Later
+
+```swift
+import ApproovServiceWebView
+import WebKit
+
+let configuration = ApproovWebViewConfiguration(
+    approovConfig: "<your-approov-config>",
+    protectedEndpoints: [
+        ApproovWebViewProtectedEndpoint(
+            host: "api.example.com",
+            pathPrefix: "/v1/private"
+        )
+    ]
+)
+
+let webView = ApproovWebViewFactory.makeWebView(
+    configuration: configuration
+)
+
+// Load content whenever your app is ready.
+webView.load(
+    URLRequest(url: URL(string: "https://app.example.com")!)
+)
+```
+
+### Install on an Existing Customized WKWebView
+
+```swift
+import ApproovServiceWebView
+import WebKit
+
+let baseConfiguration = WKWebViewConfiguration()
+baseConfiguration.userContentController = WKUserContentController()
+baseConfiguration.websiteDataStore = .nonPersistent()
+baseConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
+
+let webView = WKWebView(frame: .zero, configuration: baseConfiguration)
+webView.scrollView.bounces = true
+webView.backgroundColor = .clear
+
+ApproovWebViewFactory.install(
+    on: webView,
+    configuration: configuration
+)
+
+webView.load(
+    URLRequest(url: URL(string: "https://app.example.com")!)
+)
+```
+
+> [!NOTE]
+> If you attach Approov to an existing `WKWebView`, do it before the first
+> protected page load, or reload after installation. The bridge is injected at
+> document start and cannot retrofit a page that already finished loading.
+
 ## Operational Notes
 
 - Use `protectedEndpoints` to keep the native interception scope explicit and reviewable.
 - Keep secrets, API keys, and tenant-specific headers inside `mutateRequest`, not in page JavaScript.
 - Use `configureApproovService` if your app needs one-time Approov setup beyond a development key.
+- For reused base web views, install the bridge before the first protected navigation, or reload after installation.
+- Keep `bridgeHandlerName` unique if your app already registers page-world `WKScriptMessageHandler`s on the same `WKUserContentController`.
 - Default behavior is fail-closed. Set `allowRequestsWithoutApproovToken` only when your use case explicitly requires fail-open handling.
 
 ## Related Dependencies

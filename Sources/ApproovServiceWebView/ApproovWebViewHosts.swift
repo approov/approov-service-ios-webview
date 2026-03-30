@@ -1,62 +1,6 @@
-import ApproovServiceWebViewCore
 import SwiftUI
 import UIKit
 import WebKit
-
-/// Shared `WKWebView` builder used by both the SwiftUI and UIKit hosts.
-private enum ApproovWebViewFactory {
-    static func makeWebView(
-        content: ApproovWebViewContent,
-        configuration: ApproovWebViewConfiguration,
-        coordinator: ApproovWebViewCoordinator
-    ) -> WKWebView {
-        let userContentController = WKUserContentController()
-
-        // Inject the bridge before any page code runs so page scripts cannot
-        // race Fetch, XHR, or form submission before the native wrappers exist.
-        let bridgeScript = WKUserScript(
-            source: ApproovServiceWebViewCore.ApproovWebViewJavaScriptBridge.scriptSource(
-                handlerName: configuration.bridgeHandlerName,
-                protectedEndpoints: configuration.protectedEndpoints
-            ),
-            injectionTime: .atDocumentStart,
-            // Production pages often use iframes. Injecting into all frames
-            // gives the bridge coverage there as well.
-            forMainFrameOnly: false
-        )
-
-        userContentController.addUserScript(bridgeScript)
-        userContentController.addScriptMessageHandler(
-            coordinator,
-            contentWorld: .page,
-            name: configuration.bridgeHandlerName
-        )
-
-        let webViewConfiguration = WKWebViewConfiguration()
-        webViewConfiguration.userContentController = userContentController
-        webViewConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
-        webViewConfiguration.websiteDataStore = .default()
-
-        let webView = WKWebView(frame: .zero, configuration: webViewConfiguration)
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.scrollView.bounces = false
-        webView.isOpaque = false
-        webView.backgroundColor = .systemBackground
-
-        coordinator.attach(webView: webView)
-
-        switch content {
-        case let .htmlString(html, baseURL):
-            webView.loadHTMLString(html, baseURL: baseURL)
-        case let .fileURL(fileURL, readAccessURL):
-            webView.loadFileURL(fileURL, allowingReadAccessTo: readAccessURL)
-        case let .request(request):
-            webView.load(request)
-        }
-
-        return webView
-    }
-}
 
 /// SwiftUI wrapper around `WKWebView` that installs the Approov bridge.
 public struct ApproovWebView: UIViewRepresentable {
