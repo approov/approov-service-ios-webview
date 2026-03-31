@@ -78,6 +78,13 @@ package enum ApproovWebViewJavaScriptBridge {
 
       // Only proxy ordinary HTTP(S) traffic. Browser-only schemes such as
       // `data:` or `blob:` should keep using the browser stack directly.
+      const matchesPathPrefix = (pathname, pathPrefix) => {
+        const normalizedPathPrefix = pathPrefix || "/";
+        return normalizedPathPrefix === "/"
+          ? true
+          : pathname === normalizedPathPrefix || pathname.startsWith(`${normalizedPathPrefix}/`);
+      };
+
       const isProtectedEndpoint = (urlString) => {
         try {
           const resolvedURL = new URL(urlString, window.location.href);
@@ -88,13 +95,16 @@ package enum ApproovWebViewJavaScriptBridge {
           const hostname = resolvedURL.hostname.toLowerCase();
           const pathname = resolvedURL.pathname || "/";
           return protectedEndpoints.some((entry) => {
-            const pathPrefix = entry.pathPrefix || "/";
+            const excludedPathPrefixes = Array.isArray(entry.excludedPathPrefixes)
+              ? entry.excludedPathPrefixes
+              : [];
             const schemeMatches = resolvedURL.protocol === `${entry.scheme}:`;
             const hostMatches = hostname === entry.host;
-            const pathMatches = pathPrefix === "/"
-              ? true
-              : pathname === pathPrefix || pathname.startsWith(`${pathPrefix}/`);
-            return schemeMatches && hostMatches && pathMatches;
+            const pathMatches = matchesPathPrefix(pathname, entry.pathPrefix);
+            const pathExcluded = excludedPathPrefixes.some((excludedPathPrefix) =>
+              matchesPathPrefix(pathname, excludedPathPrefix)
+            );
+            return schemeMatches && hostMatches && pathMatches && !pathExcluded;
           });
         } catch (_error) {
           return false;

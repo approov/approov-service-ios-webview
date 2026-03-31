@@ -1,5 +1,5 @@
 {
-  "originHash" : "21ca0cc1326297312d77d38fd075f309080df60d59b42b3f3b258e9748f9172d",
+  "originHash" : "668f3db4d77f50764d2a25bc37ee76889913846e7c458572a90d808ca8385e6e",
   "pins" : [
     {
       "identity" : "approov-ios-sdk",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/approov/approov-service-urlsession.git",
       "state" : {
-        "revision" : "840cb8de753367c18862a486e610eee3cba5c19a",
-        "version" : "3.5.6"
+        "revision" : "3088854566a879c6c4c2694ed9b9a72463bd315b",
+        "version" : "3.5.7"
       }
     },
     {

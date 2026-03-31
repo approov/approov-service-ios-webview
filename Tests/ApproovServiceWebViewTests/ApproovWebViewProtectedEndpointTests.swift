@@ -24,4 +24,31 @@ final class ApproovWebViewProtectedEndpointTests: XCTestCase {
         XCTAssertTrue(endpoint.matches(URL(string: "https://api.example.com/")!))
         XCTAssertTrue(endpoint.matches(URL(string: "https://api.example.com/anything/here")!))
     }
+
+    func testMatchesExcludedPathPrefixesWithinIncludedHostScope() {
+        let endpoint = ApproovWebViewProtectedEndpoint(
+            host: "store.example.com",
+            pathPrefix: "/",
+            excludedPathPrefixes: [
+                "assets/static"
+            ]
+        )
+
+        XCTAssertTrue(endpoint.matches(URL(string: "https://store.example.com/checkout")!))
+        XCTAssertFalse(endpoint.matches(URL(string: "https://store.example.com/assets/static/app-config/en-GB.json")!))
+        XCTAssertFalse(endpoint.matches(URL(string: "https://store.example.com/assets/static/content/global.config.post.json")!))
+    }
+
+    func testMatchesExcludedPathPrefixesOnlyForFullPathSegments() {
+        let endpoint = ApproovWebViewProtectedEndpoint(
+            host: "api.example.com",
+            pathPrefix: "/",
+            excludedPathPrefixes: [
+                "/static"
+            ]
+        )
+
+        XCTAssertFalse(endpoint.matches(URL(string: "https://api.example.com/static/file.json")!))
+        XCTAssertTrue(endpoint.matches(URL(string: "https://api.example.com/statics/file.json")!))
+    }
 }

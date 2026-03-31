@@ -64,7 +64,7 @@ import ApproovServiceWebView
 | `ApproovWebViewController` | UIKit host for the same bridge and request pipeline. |
 | `ApproovWebViewFactory` | Low-level API for creating or installing an Approov bridge on a raw `WKWebView`. |
 | `ApproovWebViewConfiguration` | Main integration surface for Approov setup, endpoint allowlisting, token header settings, fail-open policy, and native request mutation. |
-| `ApproovWebViewProtectedEndpoint` | Scheme, host, and path-prefix matcher for protected traffic. |
+| `ApproovWebViewProtectedEndpoint` | Scheme, host, path-prefix, and excluded-path-prefix matcher for protected traffic. |
 | `ApproovWebViewContent` | Initial content source for the web view: request, HTML string, or file URL. |
 
 `ApproovServiceWebView` re-exports the shared core types, so a single `import ApproovServiceWebView` is sufficient in app code.
@@ -221,11 +221,24 @@ and URL query strings.
 ## Operational Notes
 
 - Use `protectedEndpoints` to keep the native interception scope explicit and reviewable.
+- Use `excludedPathPrefixes` when you want to protect an entire host or broad path while allowing static assets or other public subpaths to stay on the normal WebKit stack.
 - Keep secrets, API keys, and tenant-specific headers inside `mutateRequest`, not in page JavaScript.
 - Use `configureApproovService` if your app needs one-time Approov setup beyond a development key.
 - For reused base web views, install the bridge before the first protected navigation, or reload after installation.
 - Keep `bridgeHandlerName` unique if your app already registers page-world `WKScriptMessageHandler`s on the same `WKUserContentController`.
 - Default behavior is fail-closed. Set `allowRequestsWithoutApproovToken` only when your use case explicitly requires fail-open handling.
+
+Example:
+
+```swift
+ApproovWebViewProtectedEndpoint(
+    host: "store.example.com",
+    pathPrefix: "/",
+    excludedPathPrefixes: [
+        "/assets/static"
+    ]
+)
+```
 
 ## Related Dependencies
 

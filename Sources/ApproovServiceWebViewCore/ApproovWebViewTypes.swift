@@ -18,15 +18,18 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
     public let scheme: String
     public let host: String
     public let pathPrefix: String
+    public let excludedPathPrefixes: [String]
 
     public init(
         scheme: String = "https",
         host: String,
-        pathPrefix: String
+        pathPrefix: String,
+        excludedPathPrefixes: [String] = []
     ) {
         self.scheme = scheme.lowercased()
         self.host = host.lowercased()
         self.pathPrefix = Self.normalizePathPrefix(pathPrefix)
+        self.excludedPathPrefixes = excludedPathPrefixes.map(Self.normalizePathPrefix)
     }
 
     public func matches(_ url: URL) -> Bool {
@@ -38,11 +41,13 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
         }
 
         let urlPath = url.path.isEmpty ? "/" : url.path
-        if pathPrefix == "/" {
-            return true
+        guard Self.pathMatches(urlPath, pathPrefix: pathPrefix) else {
+            return false
         }
 
-        return urlPath == pathPrefix || urlPath.hasPrefix(pathPrefix + "/")
+        return !excludedPathPrefixes.contains { excludedPathPrefix in
+            Self.pathMatches(urlPath, pathPrefix: excludedPathPrefix)
+        }
     }
 
     private static func normalizePathPrefix(_ pathPrefix: String) -> String {
@@ -52,6 +57,14 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
         }
 
         return trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+    }
+
+    private static func pathMatches(_ urlPath: String, pathPrefix: String) -> Bool {
+        if pathPrefix == "/" {
+            return true
+        }
+
+        return urlPath == pathPrefix || urlPath.hasPrefix(pathPrefix + "/")
     }
 }
 

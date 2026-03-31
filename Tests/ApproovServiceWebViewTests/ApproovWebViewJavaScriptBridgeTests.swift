@@ -5,7 +5,8 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
     func testScriptSourceInjectsHandlerAndEndpoints() throws {
         let protectedEndpoint = ApproovWebViewProtectedEndpoint(
             host: "api.example.com",
-            pathPrefix: "/v1/private"
+            pathPrefix: "/v1/private",
+            excludedPathPrefixes: ["/v1/private/public-assets"]
         )
         let source = ApproovWebViewJavaScriptBridge.scriptSource(
             handlerName: "nativeBridge",
@@ -36,5 +37,15 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
         XCTAssertTrue(source.contains("forms: true"))
         XCTAssertTrue(source.contains("cookieSync: true"))
         XCTAssertTrue(source.contains("simulatedNavigations: true"))
+    }
+
+    func testScriptSourceIncludesExcludedPathMatchingLogic() {
+        let source = ApproovWebViewJavaScriptBridge.scriptSource(
+            handlerName: "nativeBridge",
+            protectedEndpoints: []
+        )
+
+        XCTAssertTrue(source.contains("entry.excludedPathPrefixes"))
+        XCTAssertTrue(source.contains("matchesPathPrefix(pathname, excludedPathPrefix)"))
     }
 }
