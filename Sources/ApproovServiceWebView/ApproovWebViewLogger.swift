@@ -56,6 +56,18 @@ extension URLRequest {
     }
 }
 
+extension ApproovWebViewProtectedEndpoint {
+    var logDescription: String {
+        let baseDescription = "\(scheme)://\(host)\(pathPrefix)"
+        guard !excludedPathPrefixes.isEmpty else {
+            return baseDescription
+        }
+
+        let excludedPrefixes = excludedPathPrefixes.joined(separator: ", ")
+        return "\(baseDescription) excluding [\(excludedPrefixes)]"
+    }
+}
+
 extension ApproovWebViewLogger {
     static func redactedURLForLog(_ value: String) -> String {
         guard let url = URL(string: value) else {
@@ -82,5 +94,20 @@ extension ApproovWebViewLogger {
         components.query = nil
         components.fragment = nil
         return components.string ?? "<invalid-url>"
+    }
+
+    static func protectedEndpointsLogDescription(
+        _ protectedEndpoints: [ApproovWebViewProtectedEndpoint]
+    ) -> String {
+        guard !protectedEndpoints.isEmpty else {
+            return "none"
+        }
+
+        return protectedEndpoints
+            .enumerated()
+            .map { index, endpoint in
+                "\(index + 1). \(endpoint.logDescription)"
+            }
+            .joined(separator: "\n")
     }
 }

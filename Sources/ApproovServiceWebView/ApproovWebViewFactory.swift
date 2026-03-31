@@ -155,6 +155,9 @@ public enum ApproovWebViewFactory {
             """
             Installing bridge handler '\(configuration.bridgeHandlerName)' with \
             \(configuration.protectedEndpoints.count) protected endpoint(s)
+
+            Protected endpoints:
+            \(ApproovWebViewLogger.protectedEndpointsLogDescription(configuration.protectedEndpoints))
             """
         )
 
