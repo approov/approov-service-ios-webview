@@ -1,5 +1,5 @@
 import Approov
-import ApproovURLSession
+import ApproovURLSessionPackage
 import Foundation
 
 /// Executes the native side of the protected request flow.

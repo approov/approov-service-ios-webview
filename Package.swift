@@ -1,7 +1,7 @@
 // swift-tools-version:5.10
 import PackageDescription
 
-let approovURLSessionVersion = "3.5.7"
+let approovURLSessionPackageVersion = "3.5.7"
 let approovSDKVersion = "3.5.3"
 
 let package = Package(
@@ -18,7 +18,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/approov/approov-service-urlsession.git",
-            exact: Version(stringLiteral: approovURLSessionVersion)
+            exact: Version(stringLiteral: approovURLSessionPackageVersion)
         ),
         .package(
             url: "https://github.com/approov/approov-ios-sdk.git",
@@ -35,7 +35,7 @@ let package = Package(
             dependencies: [
                 "ApproovServiceWebViewCore",
                 .product(
-                    name: "ApproovURLSession",
+                    name: "ApproovURLSessionPackage",
                     package: "approov-service-urlsession"
                 ),
                 .product(
