@@ -14,7 +14,7 @@ final actor ApproovWebViewRequestExecutor {
     private let configuration: ApproovWebViewConfiguration
     private let cookieBridge: ApproovWebViewCookieBridge
     private let cookieStorage = HTTPCookieStorage()
-    private let urlSession: ApproovURLSessionPackage
+    private let urlSession: ApproovURLSession
     private let logger: ApproovWebViewLogger
     private let scopeID = UUID().uuidString
     private var didInitializeApproov = false
@@ -33,7 +33,7 @@ final actor ApproovWebViewRequestExecutor {
         sessionConfiguration.httpShouldSetCookies = true
         sessionConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
         sessionConfiguration.urlCache = nil
-        self.urlSession = ApproovURLSessionPackage(configuration: sessionConfiguration)
+        self.urlSession = ApproovURLSession(configuration: sessionConfiguration)
         logger.debug("Created native request executor with scope \(scopeID)")
     }
 
@@ -228,7 +228,7 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Uses the completion-handler `dataTask(...)` path because the async
-    /// convenience APIs are not protected by `ApproovURLSessionPackage`.
+    /// convenience APIs are not protected by `ApproovURLSession`.
     private func performPinnedRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
         logger.debug("Executing protected request via ApproovURLSession: \(request.logDescription)")
         return try await withCheckedThrowingContinuation {
