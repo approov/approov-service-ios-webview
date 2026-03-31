@@ -1,5 +1,5 @@
 import Approov
-import ApproovURLSession
+import ApproovURLSessionPackage
 import Foundation
 
 /// Composes the host app's existing `ApproovServiceMutator` with the WebView
