@@ -2,7 +2,7 @@ import ApproovServiceWebViewCore
 import Foundation
 import OSLog
 
-struct ApproovWebViewLogger {
+struct ApproovWebViewLogger: Sendable {
     private let logger: Logger
     private let debugLoggingEnabled: Bool
 

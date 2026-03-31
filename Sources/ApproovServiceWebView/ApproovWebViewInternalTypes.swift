@@ -55,6 +55,7 @@ enum ApproovWebViewBridgeError: LocalizedError {
     case unsupportedScheme(String)
     case invalidRequestBody
     case approovConfigEmpty
+    case approovConfigMismatch
     case requestNotProtected(String)
     case nonHTTPResponse
     case webViewUnavailable
@@ -69,6 +70,8 @@ enum ApproovWebViewBridgeError: LocalizedError {
             return "The WebView request body was not valid base64."
         case .approovConfigEmpty:
             return "The Approov config string is empty."
+        case .approovConfigMismatch:
+            return "The Approov SDK was already initialized with a different configuration."
         case let .requestNotProtected(url):
             return "The WebView tried to proxy an unprotected request through native code: \(url)"
         case .nonHTTPResponse:

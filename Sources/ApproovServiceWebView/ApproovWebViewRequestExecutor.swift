@@ -11,13 +11,16 @@ import Foundation
 /// - execution through `ApproovURLSession`
 /// - mapping the result back into either JS response mode or navigation mode
 final actor ApproovWebViewRequestExecutor {
+    private static let sdkInitializationCoordinator =
+        ApproovWebViewSDKInitializationCoordinator()
+
     private let configuration: ApproovWebViewConfiguration
     private let cookieBridge: ApproovWebViewCookieBridge
     private let cookieStorage = HTTPCookieStorage()
     private let urlSession: ApproovURLSession
     private let logger: ApproovWebViewLogger
     private let scopeID = UUID().uuidString
-    private var didInitializeApproov = false
+    private var didPrepareApproovForScope = false
 
     init(
         configuration: ApproovWebViewConfiguration,
@@ -54,7 +57,7 @@ final actor ApproovWebViewRequestExecutor {
         }
 
         try await synchronizeCookiesIntoNativeStorage()
-        try initializeApproovIfNeeded()
+        try await initializeApproovIfNeeded()
 
         var request = requestContext.request
         ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &request)
@@ -187,9 +190,9 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Initializes Approov lazily the first time protected traffic is sent.
-    private func initializeApproovIfNeeded() throws {
-        guard !didInitializeApproov else {
-            logger.debug("Approov already initialized for scope \(scopeID)")
+    private func initializeApproovIfNeeded() async throws {
+        guard !didPrepareApproovForScope else {
+            logger.debug("Approov already prepared for scope \(scopeID)")
             return
         }
 
@@ -202,7 +205,7 @@ final actor ApproovWebViewRequestExecutor {
 
         logger.debug(
             """
-            Initializing Approov for scope \(scopeID) with \
+            Preparing Approov for scope \(scopeID) with \
             \(configuration.protectedEndpoints.count) protected endpoint(s)
             """
         )
@@ -210,21 +213,32 @@ final actor ApproovWebViewRequestExecutor {
             scopeID: scopeID,
             configuration: configuration
         )
-        try ApproovService.initialize(config: trimmedConfig)
-        ApproovService.setApproovHeader(
-            header: configuration.approovTokenHeaderName,
-            prefix: configuration.approovTokenHeaderPrefix
+        let didInitializeSDK =
+            try await Self.sdkInitializationCoordinator.initializeIfNeeded(
+                config: trimmedConfig
+            )
+        logger.debug(
+            didInitializeSDK
+                ? "Approov SDK initialized for scope \(scopeID)"
+                : "Approov SDK already initialized before scope \(scopeID)"
         )
-        if let approovDevelopmentKey = configuration.approovDevelopmentKey,
-           !approovDevelopmentKey.isEmpty {
-            logger.debug("Applying Approov development key")
-            ApproovService.setDevKey(devKey: approovDevelopmentKey)
-        }
-        logger.debug("Running host Approov configuration hook")
-        try configuration.configureApproovService()
 
-        didInitializeApproov = true
-        logger.debug("Approov initialization completed for scope \(scopeID)")
+        try await MainActor.run {
+            ApproovService.setApproovHeader(
+                header: configuration.approovTokenHeaderName,
+                prefix: configuration.approovTokenHeaderPrefix
+            )
+            if let approovDevelopmentKey = configuration.approovDevelopmentKey,
+               !approovDevelopmentKey.isEmpty {
+                logger.debug("Applying Approov development key")
+                ApproovService.setDevKey(devKey: approovDevelopmentKey)
+            }
+            logger.debug("Running host Approov configuration hook")
+            try configuration.configureApproovService()
+        }
+
+        didPrepareApproovForScope = true
+        logger.debug("Approov preparation completed for scope \(scopeID)")
     }
 
     /// Uses the completion-handler `dataTask(...)` path because the async
