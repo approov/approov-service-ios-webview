@@ -150,6 +150,47 @@ final class ApproovWebViewFactoryTests: XCTestCase {
     }
 
     @MainActor
+    func testMakeWebViewUsesInstalledCoordinatorForInitialLoadOnReinstallation() async {
+        let originalFactory = ApproovWebViewCoordinator.requestExecutorFactory
+        let firstExecutor = StubRequestExecutor(
+            result: .failure(StubExecutorError.initialNavigationFailed)
+        )
+        let secondExecutor = StubRequestExecutor(
+            result: .success(makeNavigationLoad(urlString: "https://api.example.com/v1/items"))
+        )
+        var factoryCallCount = 0
+        ApproovWebViewCoordinator.requestExecutorFactory = { _, _ in
+            factoryCallCount += 1
+            return factoryCallCount == 1 ? firstExecutor : secondExecutor
+        }
+        defer {
+            ApproovWebViewCoordinator.requestExecutorFactory = originalFactory
+        }
+
+        let webView = makeRecordingWebView()
+
+        _ = ApproovWebViewFactory.makeWebView(
+            configuration: makeConfiguration(protectInitialNavigation: true),
+            baseWebView: webView
+        )
+
+        let simulatedLoadExpectation = expectation(description: "reinstalled web view used existing coordinator for initial load")
+        webView.onSimulatedLoad = { simulatedLoadExpectation.fulfill() }
+
+        let request = URLRequest(url: URL(string: "https://api.example.com/v1/items")!)
+        _ = ApproovWebViewFactory.makeWebView(
+            content: .request(request),
+            configuration: makeConfiguration(protectInitialNavigation: true),
+            baseWebView: webView
+        )
+
+        await fulfillment(of: [simulatedLoadExpectation], timeout: 1.0)
+        XCTAssertEqual(await firstExecutor.initialNavigationExecutionCount(), 1)
+        XCTAssertEqual(await secondExecutor.initialNavigationExecutionCount(), 0)
+        XCTAssertEqual(webView.simulatedNavigationLoads.count, 1)
+    }
+
+    @MainActor
     func testMakeWebViewReusesProvidedBaseWebView() {
         let baseConfiguration = WKWebViewConfiguration()
         baseConfiguration.userContentController = WKUserContentController()

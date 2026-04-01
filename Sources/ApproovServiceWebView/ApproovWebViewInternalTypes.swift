@@ -49,6 +49,7 @@ enum ApproovWebViewExecutionResult {
     case navigation(ApproovWebViewNavigationLoad)
 }
 
+/// Abstracts the execution of WebView requests for concurrent processing.
 protocol ApproovWebViewRequestExecuting: Sendable {
     func execute(_ proxyRequest: ApproovWebViewProxyRequest) async throws -> ApproovWebViewExecutionResult
     func executeInitialNavigation(_ request: URLRequest) async throws -> ApproovWebViewNavigationLoad

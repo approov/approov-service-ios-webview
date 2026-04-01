@@ -59,7 +59,7 @@ public enum ApproovWebViewFactory {
             """
         )
 
-        installBridgeIfNeeded(
+        let activeCoordinator = installBridgeIfNeeded(
             on: webView,
             configuration: configuration,
             coordinator: coordinator
@@ -67,7 +67,7 @@ public enum ApproovWebViewFactory {
 
         if let content {
             logger.debug("Loading initial content into protected web view: \(content.logDescription)")
-            coordinator.loadInitialContent(content)
+            activeCoordinator.loadInitialContent(content)
         } else {
             logger.debug("Protected web view created without initial content")
         }
@@ -92,7 +92,7 @@ public enum ApproovWebViewFactory {
         let coordinator = coordinator ?? makeCoordinator(configuration: configuration)
         logger.debug("Installing Approov bridge on existing WKWebView")
 
-        installBridgeIfNeeded(
+        _ = installBridgeIfNeeded(
             on: webView,
             configuration: configuration,
             coordinator: coordinator
@@ -122,7 +122,7 @@ public enum ApproovWebViewFactory {
         on webView: WKWebView,
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator
-    ) {
+    ) -> ApproovWebViewCoordinator {
         let logger = ApproovWebViewLogger(configuration: configuration)
         let bridgeScriptSource =
             ApproovServiceWebViewCore.ApproovWebViewJavaScriptBridge.scriptSource(
@@ -140,7 +140,7 @@ public enum ApproovWebViewFactory {
                 """
             )
             installation.coordinator.attach(webView: webView)
-            return
+            return installation.coordinator
         }
 
         assert(
@@ -194,6 +194,8 @@ public enum ApproovWebViewFactory {
             ),
             on: webView
         )
+
+        return coordinator
     }
     @MainActor
     private static func installation(for webView: WKWebView) -> ApproovWebViewInstallation? {
