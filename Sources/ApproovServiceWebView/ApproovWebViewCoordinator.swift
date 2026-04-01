@@ -39,15 +39,19 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         didReceive message: WKScriptMessage,
         replyHandler: @escaping (Any?, String?) -> Void
     ) {
-        guard let executor else {
-            logger.error("Received bridge message before the native executor was attached")
-            replyHandler(nil, "The native bridge is not ready yet.")
-            return
-        }
-
         guard let bodyDictionary = message.body as? [String: Any] else {
             logger.error("Received a bridge payload that was not a dictionary")
             replyHandler(nil, "The WebView bridge payload was not a dictionary.")
+            return
+        }
+
+        if handleDiagnosticMessage(bodyDictionary, replyHandler: replyHandler) {
+            return
+        }
+
+        guard let executor else {
+            logger.error("Received bridge message before the native executor was attached")
+            replyHandler(nil, "The native bridge is not ready yet.")
             return
         }
 
@@ -104,6 +108,34 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private func makeReplyObject(from response: ApproovWebViewProxyResponse) throws -> Any {
         let encodedResponse = try encoder.encode(response)
         return try JSONSerialization.jsonObject(with: encodedResponse, options: [])
+    }
+
+    private func handleDiagnosticMessage(
+        _ bodyDictionary: [String: Any],
+        replyHandler: @escaping (Any?, String?) -> Void
+    ) -> Bool {
+        guard let kind = bodyDictionary["kind"] as? String,
+              kind == "diagnostic" else {
+            return false
+        }
+
+        let event = bodyDictionary["event"] as? String ?? "unknown"
+        switch event {
+        case "unprotected-request-bypass":
+            let requestSource = (bodyDictionary["requestSource"] as? String ?? "unknown").uppercased()
+            let url = bodyDictionary["url"] as? String ?? "<missing-url>"
+            logger.debug(
+                """
+                WebView bridge bypassed native handling for unprotected \(requestSource) \
+                request: \(ApproovWebViewLogger.redactedURLForLog(url))
+                """
+            )
+        default:
+            logger.debug("Received WebView bridge diagnostic event '\(event)'")
+        }
+
+        replyHandler(["logged": true], nil)
+        return true
     }
 
     /// Loads a native response back into the WebView as a real navigation.

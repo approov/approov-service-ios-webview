@@ -157,6 +157,25 @@ package enum ApproovWebViewJavaScriptBridge {
         });
       };
 
+      const postDiagnostic = (payload) => {
+        try {
+          Promise.resolve(nativeHandler.postMessage({
+            kind: "diagnostic",
+            ...payload,
+          })).catch(() => {});
+        } catch (_error) {
+          // Diagnostic logging must never interfere with page traffic.
+        }
+      };
+
+      const logUnprotectedRequestBypass = (requestSource, urlString) => {
+        postDiagnostic({
+          event: "unprotected-request-bypass",
+          requestSource,
+          url: urlString,
+        });
+      };
+
       const dispatchFormEvent = (form, eventName, detail) => {
         form.dispatchEvent(new CustomEvent(eventName, {
           bubbles: true,
@@ -300,6 +319,7 @@ package enum ApproovWebViewJavaScriptBridge {
 
         const actionURL = resolveFormAction(form, submitter);
         if (!isProtectedEndpoint(actionURL)) {
+          logUnprotectedRequestBypass("form", actionURL);
           return false;
         }
 
@@ -361,6 +381,7 @@ package enum ApproovWebViewJavaScriptBridge {
           : new Request(input, init);
 
         if (!isProtectedEndpoint(request.url)) {
+          logUnprotectedRequestBypass("fetch", request.url);
           return originalFetch(input, init);
         }
 
@@ -404,6 +425,7 @@ package enum ApproovWebViewJavaScriptBridge {
           this._fallback = null;
 
           if (!isProtectedEndpoint(this._url)) {
+            logUnprotectedRequestBypass("xhr", this._url);
             this._fallback = new OriginalXMLHttpRequest();
             this._wireFallback();
             this._fallback.responseType = this.responseType;

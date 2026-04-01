@@ -48,4 +48,17 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
         XCTAssertTrue(source.contains("entry.excludedPathPrefixes"))
         XCTAssertTrue(source.contains("matchesPathPrefix(pathname, excludedPathPrefix)"))
     }
+
+    func testScriptSourceIncludesUnprotectedRequestDiagnosticLogging() {
+        let source = ApproovWebViewJavaScriptBridge.scriptSource(
+            handlerName: "nativeBridge",
+            protectedEndpoints: []
+        )
+
+        XCTAssertTrue(source.contains("kind: \"diagnostic\""))
+        XCTAssertTrue(source.contains("event: \"unprotected-request-bypass\""))
+        XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"fetch\", request.url)"))
+        XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"xhr\", this._url)"))
+        XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"form\", actionURL)"))
+    }
 }
