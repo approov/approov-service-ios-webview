@@ -10,7 +10,7 @@ import Foundation
 /// - browser-context header reconstruction
 /// - execution through `ApproovURLSession`
 /// - mapping the result back into either JS response mode or navigation mode
-final actor ApproovWebViewRequestExecutor {
+final actor ApproovWebViewRequestExecutor: ApproovWebViewRequestExecuting {
     private let configuration: ApproovWebViewConfiguration
     private let cookieBridge: ApproovWebViewCookieBridge
     private let cookieStorage = HTTPCookieStorage()
@@ -41,62 +41,28 @@ final actor ApproovWebViewRequestExecutor {
     func execute(_ proxyRequest: ApproovWebViewProxyRequest) async throws -> ApproovWebViewExecutionResult {
         logger.debug("Starting native execution for \(proxyRequest.logDescription)")
         let requestContext = try makeRequestContext(from: proxyRequest)
-        guard configuration.isProtectedEndpoint(requestContext.requestURL) else {
-            logger.error(
-                """
-                Rejecting unprotected WebView request routed into native code: \
-                \(ApproovWebViewLogger.redactedURLForLog(requestContext.requestURL))
-                """
-            )
-            throw ApproovWebViewBridgeError.requestNotProtected(
-                requestContext.requestURL.absoluteString
-            )
-        }
+        return try await executeProtectedRequest(
+            requestContext.request,
+            requestURL: requestContext.requestURL,
+            responseHandling: proxyRequest.responseHandling
+        )
+    }
 
-        try await synchronizeCookiesIntoNativeStorage()
-        try initializeApproovIfNeeded()
+    /// Executes the initial top-level document request natively.
+    func executeInitialNavigation(_ request: URLRequest) async throws -> ApproovWebViewNavigationLoad {
+        logger.debug("Starting native execution for initial navigation \(request.logDescription)")
+        let requestContext = try makeInitialNavigationRequestContext(from: request)
+        let result = try await executeProtectedRequest(
+            requestContext.request,
+            requestURL: requestContext.requestURL,
+            responseHandling: .navigation
+        )
 
-        var request = requestContext.request
-        ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &request)
-
-        let (data, response) = try await performPinnedRequest(request)
-        guard let httpResponse = response as? HTTPURLResponse else {
+        guard case let .navigation(navigationLoad) = result else {
             throw ApproovWebViewBridgeError.nonHTTPResponse
         }
 
-        await synchronizeCookiesBackIntoWebView()
-        logger.debug(
-            """
-            Native execution completed with status \(httpResponse.statusCode) \
-            for \(ApproovWebViewLogger.redactedURLForLog(httpResponse.url ?? requestContext.requestURL)) \
-            and \(data.count) bytes
-            """
-        )
-
-        let finalURL = httpResponse.url ?? requestContext.requestURL
-        let proxyResponse = ApproovWebViewProxyResponse(
-            url: finalURL.absoluteString,
-            status: httpResponse.statusCode,
-            statusText: HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode),
-            headers: normalizeHeaders(httpResponse.allHeaderFields),
-            bodyBase64: data.base64EncodedString()
-        )
-
-        switch proxyRequest.responseHandling {
-        case .response:
-            return .response(proxyResponse)
-        case .navigation:
-            // Simulated navigation should use the final response URL so the
-            // page is interpreted relative to the post-redirect document URL.
-            let simulatedRequest = URLRequest(url: finalURL)
-            return .navigation(
-                ApproovWebViewNavigationLoad(
-                    request: simulatedRequest,
-                    response: httpResponse,
-                    data: data
-                )
-            )
-        }
+        return navigationLoad
     }
 
     /// Builds the native `URLRequest` from the JavaScript payload.
@@ -132,9 +98,91 @@ final actor ApproovWebViewRequestExecutor {
             applyBrowserContextHeaders(to: &request, pageURL: pageURL)
         }
 
-        applyCookies(to: &request, for: requestURL)
+        return (requestURL, request)
+    }
+
+    /// Builds the native `URLRequest` for an initial top-level navigation.
+    private func makeInitialNavigationRequestContext(
+        from initialRequest: URLRequest
+    ) throws -> (requestURL: URL, request: URLRequest) {
+        guard let requestURL = initialRequest.url else {
+            throw ApproovWebViewBridgeError.invalidURL("<nil-url>")
+        }
+
+        guard Self.isHTTPScheme(requestURL) else {
+            throw ApproovWebViewBridgeError.unsupportedScheme(requestURL.absoluteString)
+        }
+
+        var request = initialRequest
+        if request.httpMethod == nil || request.httpMethod?.isEmpty == true {
+            request.httpMethod = "GET"
+        }
 
         return (requestURL, request)
+    }
+
+    private func executeProtectedRequest(
+        _ request: URLRequest,
+        requestURL: URL,
+        responseHandling: ApproovWebViewResponseHandling
+    ) async throws -> ApproovWebViewExecutionResult {
+        guard configuration.isProtectedEndpoint(requestURL) else {
+            logger.error(
+                """
+                Rejecting unprotected WebView request routed into native code: \
+                \(ApproovWebViewLogger.redactedURLForLog(requestURL))
+                """
+            )
+            throw ApproovWebViewBridgeError.requestNotProtected(
+                requestURL.absoluteString
+            )
+        }
+
+        try await synchronizeCookiesIntoNativeStorage()
+        try initializeApproovIfNeeded()
+
+        var request = request
+        applyCookies(to: &request, for: requestURL)
+        ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &request)
+
+        let (data, response) = try await performPinnedRequest(request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ApproovWebViewBridgeError.nonHTTPResponse
+        }
+
+        await synchronizeCookiesBackIntoWebView()
+        logger.debug(
+            """
+            Native execution completed with status \(httpResponse.statusCode) \
+            for \(ApproovWebViewLogger.redactedURLForLog(httpResponse.url ?? requestURL)) \
+            and \(data.count) bytes
+            """
+        )
+
+        let finalURL = httpResponse.url ?? requestURL
+        let proxyResponse = ApproovWebViewProxyResponse(
+            url: finalURL.absoluteString,
+            status: httpResponse.statusCode,
+            statusText: HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode),
+            headers: normalizeHeaders(httpResponse.allHeaderFields),
+            bodyBase64: data.base64EncodedString()
+        )
+
+        switch responseHandling {
+        case .response:
+            return .response(proxyResponse)
+        case .navigation:
+            // Simulated navigation should use the final response URL so the
+            // page is interpreted relative to the post-redirect document URL.
+            let simulatedRequest = URLRequest(url: finalURL)
+            return .navigation(
+                ApproovWebViewNavigationLoad(
+                    request: simulatedRequest,
+                    response: httpResponse,
+                    data: data
+                )
+            )
+        }
     }
 
     /// Mirrors browser-managed headers that matter for API compatibility.

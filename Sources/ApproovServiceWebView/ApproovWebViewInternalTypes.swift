@@ -49,6 +49,11 @@ enum ApproovWebViewExecutionResult {
     case navigation(ApproovWebViewNavigationLoad)
 }
 
+protocol ApproovWebViewRequestExecuting: Sendable {
+    func execute(_ proxyRequest: ApproovWebViewProxyRequest) async throws -> ApproovWebViewExecutionResult
+    func executeInitialNavigation(_ request: URLRequest) async throws -> ApproovWebViewNavigationLoad
+}
+
 /// Bridge-specific errors surfaced back to page JavaScript.
 enum ApproovWebViewBridgeError: LocalizedError {
     case invalidURL(String)

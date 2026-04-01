@@ -80,6 +80,11 @@ Protected requests follow this path:
 
 Unmatched requests continue through WebKit unchanged.
 
+When `protectInitialNavigation` is enabled, the initial `.request(...)`
+document load can also be executed through native networking if it matches
+`protectedEndpoints`. This applies only to the first package-owned content
+load, not to later manual `WKWebView.load(...)` calls.
+
 ## Configuration
 
 `ApproovWebViewConfiguration` is the main contract between the host app and the package.
@@ -92,6 +97,7 @@ Unmatched requests continue through WebKit unchanged.
 | `approovTokenHeaderPrefix` | Optional header prefix, for example `Bearer `. |
 | `approovDevelopmentKey` | Optional development key applied after initialization. |
 | `allowRequestsWithoutApproovToken` | Controls fail-open vs fail-closed behavior when Approov cannot produce a token. |
+| `protectInitialNavigation` | Opt-in protection for the initial `.request(...)` document load when it matches `protectedEndpoints`. Default: `false`. |
 | `configureApproovService` | Hook for one-time Approov setup beyond the default initialization path. |
 | `mutateRequest` | Native-only request mutation point for secrets or headers that must not be exposed to page JavaScript. |
 | `debugLoggingEnabled` | Enables opt-in debug `OSLog` output for the native bridge lifecycle. |
@@ -112,6 +118,7 @@ struct ProtectedWebExperience: View {
                 pathPrefix: "/v1/private"
             )
         ],
+        protectInitialNavigation: true,
         debugLoggingEnabled: true,
         approovDevelopmentKey: "<your-development-key>",
         mutateRequest: { request in
@@ -222,6 +229,7 @@ and URL query strings.
 
 - Use `protectedEndpoints` to keep the native interception scope explicit and reviewable.
 - Use `excludedPathPrefixes` when you want to protect an entire host or broad path while allowing static assets or other public subpaths to stay on the normal WebKit stack.
+- Enable `protectInitialNavigation` only when you want the first `.request(...)` document load to go through `ApproovURLSession`; later manual `WKWebView.load(...)` calls still use the normal WebKit path.
 - Keep secrets, API keys, and tenant-specific headers inside `mutateRequest`, not in page JavaScript.
 - Use `configureApproovService` if your app needs one-time Approov setup beyond a development key.
 - For reused base web views, install the bridge before the first protected navigation, or reload after installation.

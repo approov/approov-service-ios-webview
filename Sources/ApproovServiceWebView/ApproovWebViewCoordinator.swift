@@ -4,12 +4,22 @@ import WebKit
 /// Receives JavaScript bridge messages and delegates execution to the actor
 /// that owns the native request pipeline.
 public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWithReply {
+    static var requestExecutorFactory: (
+        ApproovWebViewConfiguration,
+        ApproovWebViewCookieBridge
+    ) -> any ApproovWebViewRequestExecuting = { configuration, cookieBridge in
+        ApproovWebViewRequestExecutor(
+            configuration: configuration,
+            cookieBridge: cookieBridge
+        )
+    }
+
     private let configuration: ApproovWebViewConfiguration
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     private let logger: ApproovWebViewLogger
     private weak var webView: WKWebView?
-    private var executor: ApproovWebViewRequestExecutor?
+    private var executor: (any ApproovWebViewRequestExecuting)?
 
     public init(configuration: ApproovWebViewConfiguration) {
         self.configuration = configuration
@@ -26,12 +36,40 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
             """
         )
         self.webView = webView
-        self.executor = ApproovWebViewRequestExecutor(
-            configuration: configuration,
-            cookieBridge: ApproovWebViewCookieBridge(
+        self.executor = Self.requestExecutorFactory(
+            configuration,
+            ApproovWebViewCookieBridge(
                 store: webView.configuration.websiteDataStore.httpCookieStore
             )
         )
+    }
+
+    @MainActor
+    func loadInitialContent(_ content: ApproovWebViewContent) {
+        guard let webView else {
+            logger.error("Requested initial content load before the WKWebView was attached")
+            return
+        }
+
+        logger.debug(
+            """
+            Initial navigation protection is \
+            \(configuration.protectInitialNavigation ? "enabled" : "disabled")
+            """
+        )
+
+        switch content {
+        case let .htmlString(html, baseURL):
+            logger.debug("Loading initial htmlString content through WKWebView")
+            webView.loadHTMLString(html, baseURL: baseURL)
+
+        case let .fileURL(fileURL, readAccessURL):
+            logger.debug("Loading initial fileURL content through WKWebView")
+            webView.loadFileURL(fileURL, allowingReadAccessTo: readAccessURL)
+
+        case let .request(request):
+            loadInitialRequest(request, into: webView)
+        }
     }
 
     public func userContentController(
@@ -108,6 +146,91 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private func makeReplyObject(from response: ApproovWebViewProxyResponse) throws -> Any {
         let encodedResponse = try encoder.encode(response)
         return try JSONSerialization.jsonObject(with: encodedResponse, options: [])
+    }
+
+    @MainActor
+    private func loadInitialRequest(
+        _ request: URLRequest,
+        into webView: WKWebView
+    ) {
+        guard configuration.protectInitialNavigation else {
+            logger.debug(
+                """
+                Loading initial request through WKWebView because initial navigation \
+                protection is disabled: \(request.logDescription)
+                """
+            )
+            webView.load(request)
+            return
+        }
+
+        guard let requestURL = request.url else {
+            logger.error(
+                """
+                Initial request is missing a URL; falling back to WKWebView.load(request)
+                """
+            )
+            webView.load(request)
+            return
+        }
+
+        guard configuration.isProtectedEndpoint(requestURL) else {
+            logger.debug(
+                """
+                Loading initial request through WKWebView because it is outside the \
+                protected scope: \(request.logDescription)
+                """
+            )
+            webView.load(request)
+            return
+        }
+
+        guard let executor else {
+            logger.error(
+                """
+                Initial navigation requested before the native executor was attached; \
+                falling back to WKWebView.load(request)
+                """
+            )
+            webView.load(request)
+            return
+        }
+
+        logger.debug(
+            """
+            Initial request matched protected scope and will be executed via \
+            ApproovURLSession: \(request.logDescription)
+            """
+        )
+
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let navigationLoad = try await executor.executeInitialNavigation(request)
+                self.logger.debug(
+                    """
+                    Protected initial navigation completed successfully for \
+                    \(request.logDescription)
+                    """
+                )
+                try await MainActor.run {
+                    try self.applyNavigationLoad(navigationLoad)
+                }
+            } catch {
+                self.logger.error(
+                    """
+                    Protected initial navigation failed for \(request.logDescription): \
+                    \(error.localizedDescription). Falling back to WKWebView.load(request)
+                    """
+                )
+                await MainActor.run {
+                    self.webView?.load(request)
+                }
+            }
+        }
     }
 
     private func handleDiagnosticMessage(

@@ -67,7 +67,7 @@ public enum ApproovWebViewFactory {
 
         if let content {
             logger.debug("Loading initial content into protected web view: \(content.logDescription)")
-            load(content, into: webView)
+            coordinator.loadInitialContent(content)
         } else {
             logger.debug("Protected web view created without initial content")
         }
@@ -195,22 +195,6 @@ public enum ApproovWebViewFactory {
             on: webView
         )
     }
-
-    @MainActor
-    private static func load(
-        _ content: ApproovWebViewContent,
-        into webView: WKWebView
-    ) {
-        switch content {
-        case let .htmlString(html, baseURL):
-            webView.loadHTMLString(html, baseURL: baseURL)
-        case let .fileURL(fileURL, readAccessURL):
-            webView.loadFileURL(fileURL, allowingReadAccessTo: readAccessURL)
-        case let .request(request):
-            webView.load(request)
-        }
-    }
-
     @MainActor
     private static func installation(for webView: WKWebView) -> ApproovWebViewInstallation? {
         objc_getAssociatedObject(

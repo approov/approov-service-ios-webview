@@ -99,6 +99,15 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// JWT. `false` means the bridge rejects the request instead.
     public let allowRequestsWithoutApproovToken: Bool
 
+    /// Enables Approov protection for the initial `.request(...)` document
+    /// load when the URL matches `protectedEndpoints`.
+    ///
+    /// When enabled, the package executes the first top-level request through
+    /// `ApproovURLSession` and then renders the response using a simulated
+    /// WebView navigation. Later manual `WKWebView.load(...)` calls are not
+    /// affected.
+    public let protectInitialNavigation: Bool
+
     /// The strict allowlist of page requests that should be proxied into native
     /// networking and protected by `ApproovURLSession`.
     public let protectedEndpoints: [ApproovWebViewProtectedEndpoint]
@@ -132,6 +141,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         approovTokenHeaderPrefix: String = "",
         approovDevelopmentKey: String? = nil,
         allowRequestsWithoutApproovToken: Bool = false,
+        protectInitialNavigation: Bool = false,
         configureApproovService: @escaping @Sendable () throws -> Void = {},
         mutateRequest: @escaping @Sendable (URLRequest) -> URLRequest = { $0 },
         debugLoggingEnabled: Bool = true,
@@ -145,6 +155,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         self.approovTokenHeaderPrefix = approovTokenHeaderPrefix
         self.approovDevelopmentKey = approovDevelopmentKey
         self.allowRequestsWithoutApproovToken = allowRequestsWithoutApproovToken
+        self.protectInitialNavigation = protectInitialNavigation
         self.configureApproovService = configureApproovService
         self.mutateRequest = mutateRequest
         self.debugLoggingEnabled = debugLoggingEnabled

@@ -17,6 +17,7 @@ final class ApproovWebViewConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.approovTokenHeaderPrefix, "")
         XCTAssertNil(configuration.approovDevelopmentKey)
         XCTAssertFalse(configuration.allowRequestsWithoutApproovToken)
+        XCTAssertFalse(configuration.protectInitialNavigation)
         XCTAssertFalse(configuration.debugLoggingEnabled)
         XCTAssertEqual(configuration.protectedEndpoints.count, 1)
         XCTAssertTrue(configuration.isProtectedEndpoint(URL(string: "https://api.example.com/v1/items")!))
@@ -36,6 +37,7 @@ final class ApproovWebViewConfigurationTests: XCTestCase {
             approovTokenHeaderPrefix: "Bearer ",
             approovDevelopmentKey: "dev-key",
             allowRequestsWithoutApproovToken: true,
+            protectInitialNavigation: true,
             mutateRequest: { request in request },
             debugLoggingEnabled: true,
             loggerSubsystem: "test.subsystem",
@@ -47,6 +49,7 @@ final class ApproovWebViewConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.approovTokenHeaderPrefix, "Bearer ")
         XCTAssertEqual(configuration.approovDevelopmentKey, "dev-key")
         XCTAssertTrue(configuration.allowRequestsWithoutApproovToken)
+        XCTAssertTrue(configuration.protectInitialNavigation)
         XCTAssertTrue(configuration.debugLoggingEnabled)
         XCTAssertEqual(configuration.loggerSubsystem, "test.subsystem")
         XCTAssertEqual(configuration.loggerCategory, "test.category")
