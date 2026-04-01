@@ -114,8 +114,8 @@ struct ProtectedWebExperience: View {
         approovConfig: "<your-approov-config>",
         protectedEndpoints: [
             ApproovWebViewProtectedEndpoint(
-                host: "api.example.com",
-                pathPrefix: "/v1/private"
+                host: "app.example.com",
+                pathPrefix: "/"
             )
         ],
         protectInitialNavigation: true,

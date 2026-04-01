@@ -63,6 +63,7 @@ enum ApproovWebViewBridgeError: LocalizedError {
     case approovConfigEmpty
     case requestNotProtected(String)
     case nonHTTPResponse
+    case unexpectedResult
     case webViewUnavailable
 
     var errorDescription: String? {
@@ -79,6 +80,8 @@ enum ApproovWebViewBridgeError: LocalizedError {
             return "The WebView tried to proxy an unprotected request through native code: \(url)"
         case .nonHTTPResponse:
             return "Native networking returned a non-HTTP response."
+        case .unexpectedResult:
+            return "Native networking returned an unexpected execution result."
         case .webViewUnavailable:
             return "The WKWebView was released before a navigation response could be applied."
         }

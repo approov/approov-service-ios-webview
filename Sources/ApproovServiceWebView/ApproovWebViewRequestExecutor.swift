@@ -59,7 +59,7 @@ final actor ApproovWebViewRequestExecutor: ApproovWebViewRequestExecuting {
         )
 
         guard case let .navigation(navigationLoad) = result else {
-            throw ApproovWebViewBridgeError.nonHTTPResponse
+            throw ApproovWebViewBridgeError.unexpectedResult
         }
 
         return navigationLoad
