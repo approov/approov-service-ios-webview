@@ -51,4 +51,19 @@ final class ApproovWebViewProtectedEndpointTests: XCTestCase {
         XCTAssertFalse(endpoint.matches(URL(string: "https://api.example.com/static/file.json")!))
         XCTAssertTrue(endpoint.matches(URL(string: "https://api.example.com/statics/file.json")!))
     }
+
+    func testIgnoresBlankExcludedPathPrefixes() {
+        let endpoint = ApproovWebViewProtectedEndpoint(
+            host: "api.example.com",
+            pathPrefix: "/v1",
+            excludedPathPrefixes: [
+                "",
+                "   ",
+                "\n\t",
+            ]
+        )
+
+        XCTAssertEqual(endpoint.excludedPathPrefixes, [])
+        XCTAssertTrue(endpoint.matches(URL(string: "https://api.example.com/v1/private")!))
+    }
 }

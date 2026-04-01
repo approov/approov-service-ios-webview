@@ -29,7 +29,10 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
         self.scheme = scheme.lowercased()
         self.host = host.lowercased()
         self.pathPrefix = Self.normalizePathPrefix(pathPrefix)
-        self.excludedPathPrefixes = excludedPathPrefixes.map(Self.normalizePathPrefix)
+        self.excludedPathPrefixes = excludedPathPrefixes
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map(Self.normalizePathPrefix)
     }
 
     public func matches(_ url: URL) -> Bool {
