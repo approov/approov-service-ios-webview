@@ -10,7 +10,8 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
         )
         let source = ApproovWebViewJavaScriptBridge.scriptSource(
             handlerName: "nativeBridge",
-            protectedEndpoints: [protectedEndpoint]
+            protectedEndpoints: [protectedEndpoint],
+            xhrBridgeEnabled: true
         )
         let expectedEndpointJSON = try XCTUnwrap(
             String(
@@ -28,12 +29,13 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
     func testScriptSourceKeepsExpectedFeaturesEnabled() {
         let source = ApproovWebViewJavaScriptBridge.scriptSource(
             handlerName: "nativeBridge",
-            protectedEndpoints: []
+            protectedEndpoints: [],
+            xhrBridgeEnabled: true
         )
 
         XCTAssertTrue(source.contains("window.__approovBridgeEnabled = true;"))
         XCTAssertTrue(source.contains("fetch: true"))
-        XCTAssertTrue(source.contains("xhr: true"))
+        XCTAssertTrue(source.contains("xhr: xhrBridgeEnabled"))
         XCTAssertTrue(source.contains("forms: true"))
         XCTAssertTrue(source.contains("cookieSync: true"))
         XCTAssertTrue(source.contains("simulatedNavigations: true"))
@@ -42,7 +44,8 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
     func testScriptSourceIncludesExcludedPathMatchingLogic() {
         let source = ApproovWebViewJavaScriptBridge.scriptSource(
             handlerName: "nativeBridge",
-            protectedEndpoints: []
+            protectedEndpoints: [],
+            xhrBridgeEnabled: true
         )
 
         XCTAssertTrue(source.contains("entry.excludedPathPrefixes"))
@@ -52,13 +55,39 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
     func testScriptSourceIncludesUnprotectedRequestDiagnosticLogging() {
         let source = ApproovWebViewJavaScriptBridge.scriptSource(
             handlerName: "nativeBridge",
-            protectedEndpoints: []
+            protectedEndpoints: [],
+            xhrBridgeEnabled: true
         )
 
         XCTAssertTrue(source.contains("kind: \"diagnostic\""))
         XCTAssertTrue(source.contains("event: \"unprotected-request-bypass\""))
         XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"fetch\", request.url)"))
-        XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"xhr\", this._url)"))
+        XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"xhr\", resolvedURL)"))
         XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"form\", actionURL)"))
+    }
+
+    func testScriptSourceKeepsNativeXMLHttpRequestSurfaceForUnprotectedTraffic() {
+        let source = ApproovWebViewJavaScriptBridge.scriptSource(
+            handlerName: "nativeBridge",
+            protectedEndpoints: [],
+            xhrBridgeEnabled: true
+        )
+
+        XCTAssertTrue(source.contains("function ApproovXMLHttpRequest()"))
+        XCTAssertTrue(source.contains("const xhr = new OriginalXMLHttpRequest();"))
+        XCTAssertTrue(source.contains("window.XMLHttpRequest.prototype = OriginalXMLHttpRequest.prototype;"))
+        XCTAssertTrue(source.contains("if (!protectedState.active) {"))
+    }
+
+    func testScriptSourceCanDisableXMLHttpRequestBridgeInstallation() {
+        let source = ApproovWebViewJavaScriptBridge.scriptSource(
+            handlerName: "nativeBridge",
+            protectedEndpoints: [],
+            xhrBridgeEnabled: false
+        )
+
+        XCTAssertTrue(source.contains("const xhrBridgeEnabled = false;"))
+        XCTAssertTrue(source.contains("if (xhrBridgeEnabled) {"))
+        XCTAssertTrue(source.contains("xhr: xhrBridgeEnabled"))
     }
 }

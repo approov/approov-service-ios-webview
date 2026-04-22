@@ -127,7 +127,8 @@ public enum ApproovWebViewFactory {
         let bridgeScriptSource =
             ApproovServiceWebViewCore.ApproovWebViewJavaScriptBridge.scriptSource(
                 handlerName: configuration.bridgeHandlerName,
-                protectedEndpoints: configuration.protectedEndpoints
+                protectedEndpoints: configuration.protectedEndpoints,
+                xhrBridgeEnabled: configuration.interceptXMLHttpRequests
             )
 
         if let installation = installation(for: webView) {
