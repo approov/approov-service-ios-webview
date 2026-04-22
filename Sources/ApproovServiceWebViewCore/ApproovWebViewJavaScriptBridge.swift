@@ -7,16 +7,22 @@ import Foundation
 package enum ApproovWebViewJavaScriptBridge {
     private static let handlerPlaceholder = "__APPROOV_BRIDGE_HANDLER__"
     private static let protectedEndpointsPlaceholder = "__APPROOV_PROTECTED_ENDPOINTS__"
+    private static let xhrBridgeEnabledPlaceholder = "__APPROOV_XHR_BRIDGE_ENABLED__"
 
     package static func scriptSource(
         handlerName: String,
-        protectedEndpoints: [ApproovWebViewProtectedEndpoint]
+        protectedEndpoints: [ApproovWebViewProtectedEndpoint],
+        xhrBridgeEnabled: Bool
     ) -> String {
         template
             .replacingOccurrences(of: handlerPlaceholder, with: handlerName)
             .replacingOccurrences(
                 of: protectedEndpointsPlaceholder,
                 with: protectedEndpointsJSON(protectedEndpoints)
+            )
+            .replacingOccurrences(
+                of: xhrBridgeEnabledPlaceholder,
+                with: xhrBridgeEnabled ? "true" : "false"
             )
     }
 
@@ -36,6 +42,7 @@ package enum ApproovWebViewJavaScriptBridge {
     (() => {
       const nativeHandler = window.webkit?.messageHandlers?.__APPROOV_BRIDGE_HANDLER__;
       const protectedEndpoints = __APPROOV_PROTECTED_ENDPOINTS__;
+      const xhrBridgeEnabled = __APPROOV_XHR_BRIDGE_ENABLED__;
       if (!nativeHandler || typeof nativeHandler.postMessage !== "function") {
         return;
       }
@@ -394,204 +401,389 @@ package enum ApproovWebViewJavaScriptBridge {
         return makeFetchResponse(nativeResponse);
       };
 
-      // XMLHttpRequest is also wrapped because many WebView apps still use it.
-      class ApproovXMLHttpRequest {
-        constructor() {
-          this.readyState = 0;
-          this.status = 0;
-          this.statusText = "";
-          this.response = null;
-          this.responseText = "";
-          this.responseType = "";
-          this.responseURL = "";
-          this.onreadystatechange = null;
-          this.onload = null;
-          this.onerror = null;
-          this.onloadend = null;
-          this.onabort = null;
-          this._headers = {};
-          this._responseHeaders = {};
-          this._listeners = {};
-          this._fallback = null;
-          this._url = "";
-          this._method = "GET";
+      const makeXHREvent = (type, detail = null) => {
+        const event = new Event(type);
+        event.detail = detail;
+        return event;
+      };
+
+      const getXMLHttpRequestDescriptor = (propertyName) => {
+        let prototype = OriginalXMLHttpRequest.prototype;
+
+        while (prototype) {
+          const descriptor = Object.getOwnPropertyDescriptor(prototype, propertyName);
+          if (descriptor) {
+            return descriptor;
+          }
+
+          prototype = Object.getPrototypeOf(prototype);
         }
 
-        open(method, url, async = true, user = null, password = null) {
-          this._method = (method || "GET").toUpperCase();
-          this._url = new URL(url, window.location.href).toString();
-          this._headers = {};
-          this._responseHeaders = {};
-          this._fallback = null;
+        return null;
+      };
 
-          if (!isProtectedEndpoint(this._url)) {
-            logUnprotectedRequestBypass("xhr", this._url);
-            this._fallback = new OriginalXMLHttpRequest();
-            this._wireFallback();
-            this._fallback.responseType = this.responseType;
-            this._fallback.open(method, url, async, user, password);
+      const getNativeXMLHttpRequestProperty = (xhr, propertyName) => {
+        const descriptor = getXMLHttpRequestDescriptor(propertyName);
+        if (descriptor?.get) {
+          return descriptor.get.call(xhr);
+        }
+
+        return xhr[propertyName];
+      };
+
+      const setNativeXMLHttpRequestProperty = (xhr, propertyName, value) => {
+        const descriptor = getXMLHttpRequestDescriptor(propertyName);
+        if (descriptor?.set) {
+          descriptor.set.call(xhr, value);
+          return;
+        }
+
+        xhr[propertyName] = value;
+      };
+
+      const applyProtectedXHRResponseBody = (protectedState, responseBytes) => {
+        switch (protectedState.responseType) {
+          case "arraybuffer":
+            protectedState.response = responseBytes.buffer;
+            protectedState.responseText = "";
+            break;
+          case "blob":
+            protectedState.response = new Blob([responseBytes]);
+            protectedState.responseText = "";
+            break;
+          case "json": {
+            const textValue = textDecoder.decode(responseBytes);
+            protectedState.responseText = textValue;
+            protectedState.response = textValue ? JSON.parse(textValue) : null;
+            break;
+          }
+          case "":
+          case "text":
+          default: {
+            const textValue = textDecoder.decode(responseBytes);
+            protectedState.responseText = textValue;
+            protectedState.response = textValue;
+          }
+        }
+      };
+
+      // Preserve the native XHR surface for unprotected traffic and switch an
+      // individual instance into synthetic mode only when it opens a protected
+      // endpoint. This avoids breaking WebKit-only XHR behavior on pages that
+      // never needed Approov interception in the first place.
+      function ApproovXMLHttpRequest() {
+        const xhr = new OriginalXMLHttpRequest();
+        const nativeOpen = xhr.open.bind(xhr);
+        const nativeSend = xhr.send.bind(xhr);
+        const nativeAbort = xhr.abort.bind(xhr);
+        const nativeSetRequestHeader = xhr.setRequestHeader.bind(xhr);
+        const nativeGetResponseHeader = xhr.getResponseHeader.bind(xhr);
+        const nativeGetAllResponseHeaders = xhr.getAllResponseHeaders.bind(xhr);
+        const nativeOverrideMimeType = typeof xhr.overrideMimeType === "function"
+          ? xhr.overrideMimeType.bind(xhr)
+          : null;
+        const protectedState = {
+          active: false,
+          aborted: false,
+          headers: {},
+          method: "GET",
+          overrideMimeType: null,
+          readyState: 0,
+          response: null,
+          responseHeaders: {},
+          responseText: "",
+          responseType: getNativeXMLHttpRequestProperty(xhr, "responseType") || "",
+          responseURL: "",
+          status: 0,
+          statusText: "",
+          timeout: getNativeXMLHttpRequestProperty(xhr, "timeout") || 0,
+          url: "",
+          withCredentials: getNativeXMLHttpRequestProperty(xhr, "withCredentials") || false,
+        };
+
+        const changeProtectedReadyState = (nextState) => {
+          protectedState.readyState = nextState;
+          xhr.dispatchEvent(makeXHREvent("readystatechange"));
+        };
+
+        Object.defineProperties(xhr, {
+          readyState: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.readyState
+                : getNativeXMLHttpRequestProperty(xhr, "readyState");
+            },
+          },
+          status: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.status
+                : getNativeXMLHttpRequestProperty(xhr, "status");
+            },
+          },
+          statusText: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.statusText
+                : getNativeXMLHttpRequestProperty(xhr, "statusText");
+            },
+          },
+          response: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.response
+                : getNativeXMLHttpRequestProperty(xhr, "response");
+            },
+          },
+          responseText: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.responseText
+                : getNativeXMLHttpRequestProperty(xhr, "responseText");
+            },
+          },
+          responseType: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.responseType
+                : getNativeXMLHttpRequestProperty(xhr, "responseType");
+            },
+            set(value) {
+              if (protectedState.active) {
+                protectedState.responseType = value || "";
+                return;
+              }
+
+              setNativeXMLHttpRequestProperty(xhr, "responseType", value);
+            },
+          },
+          responseURL: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.responseURL
+                : getNativeXMLHttpRequestProperty(xhr, "responseURL");
+            },
+          },
+          responseXML: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? null
+                : getNativeXMLHttpRequestProperty(xhr, "responseXML");
+            },
+          },
+          timeout: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.timeout
+                : getNativeXMLHttpRequestProperty(xhr, "timeout");
+            },
+            set(value) {
+              if (protectedState.active) {
+                protectedState.timeout = Number(value) || 0;
+                return;
+              }
+
+              setNativeXMLHttpRequestProperty(xhr, "timeout", value);
+            },
+          },
+          withCredentials: {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return protectedState.active
+                ? protectedState.withCredentials
+                : getNativeXMLHttpRequestProperty(xhr, "withCredentials");
+            },
+            set(value) {
+              if (protectedState.active) {
+                protectedState.withCredentials = Boolean(value);
+                return;
+              }
+
+              setNativeXMLHttpRequestProperty(xhr, "withCredentials", value);
+            },
+          },
+        });
+
+        xhr.open = (method, url, async = true, user = null, password = null) => {
+          const resolvedURL = new URL(url, window.location.href).toString();
+
+          protectedState.aborted = false;
+          protectedState.active = false;
+          protectedState.headers = {};
+          protectedState.method = (method || "GET").toUpperCase();
+          protectedState.overrideMimeType = null;
+          protectedState.readyState = 0;
+          protectedState.response = null;
+          protectedState.responseHeaders = {};
+          protectedState.responseText = "";
+          protectedState.responseType = getNativeXMLHttpRequestProperty(xhr, "responseType") || "";
+          protectedState.responseURL = "";
+          protectedState.status = 0;
+          protectedState.statusText = "";
+          protectedState.timeout = getNativeXMLHttpRequestProperty(xhr, "timeout") || 0;
+          protectedState.url = resolvedURL;
+          protectedState.withCredentials =
+            getNativeXMLHttpRequestProperty(xhr, "withCredentials") || false;
+
+          if (!isProtectedEndpoint(resolvedURL)) {
+            logUnprotectedRequestBypass("xhr", resolvedURL);
+            return nativeOpen(method, url, async, user, password);
+          }
+
+          if (async === false) {
+            throw new DOMException(
+              "Synchronous XMLHttpRequest is not supported for protected endpoints.",
+              "NotSupportedError",
+            );
+          }
+
+          protectedState.active = true;
+          changeProtectedReadyState(1);
+        };
+
+        xhr.setRequestHeader = (name, value) => {
+          if (!protectedState.active) {
+            nativeSetRequestHeader(name, value);
             return;
           }
 
-          this._changeReadyState(1);
-        }
+          protectedState.headers[name] = value;
+        };
 
-        setRequestHeader(name, value) {
-          if (this._fallback) {
-            this._fallback.setRequestHeader(name, value);
-            return;
+        xhr.getResponseHeader = (name) => {
+          if (!protectedState.active) {
+            return nativeGetResponseHeader(name);
           }
 
-          this._headers[name] = value;
-        }
+          return protectedState.responseHeaders[name.toLowerCase()] || null;
+        };
 
-        getResponseHeader(name) {
-          if (this._fallback) {
-            return this._fallback.getResponseHeader(name);
+        xhr.getAllResponseHeaders = () => {
+          if (!protectedState.active) {
+            return nativeGetAllResponseHeaders();
           }
 
-          return this._responseHeaders[name.toLowerCase()] || null;
-        }
-
-        getAllResponseHeaders() {
-          if (this._fallback) {
-            return this._fallback.getAllResponseHeaders();
-          }
-
-          return Object.entries(this._responseHeaders)
+          return Object.entries(protectedState.responseHeaders)
             .map(([name, value]) => `${name}: ${value}`)
             .join("\r\n");
+        };
+
+        if (nativeOverrideMimeType) {
+          xhr.overrideMimeType = (mimeType) => {
+            if (!protectedState.active) {
+              nativeOverrideMimeType(mimeType);
+              return;
+            }
+
+            protectedState.overrideMimeType = mimeType;
+          };
         }
 
-        addEventListener(type, listener) {
-          this._listeners[type] = this._listeners[type] || new Set();
-          this._listeners[type].add(listener);
-        }
-
-        removeEventListener(type, listener) {
-          this._listeners[type]?.delete(listener);
-        }
-
-        abort() {
-          if (this._fallback) {
-            this._fallback.abort();
+        xhr.abort = () => {
+          if (!protectedState.active) {
+            nativeAbort();
             return;
           }
 
-          this._dispatch("abort");
-          this._dispatch("loadend");
-        }
+          if (protectedState.readyState === 0 || protectedState.readyState === 4) {
+            return;
+          }
 
-        async send(body = null) {
-          if (this._fallback) {
-            this._fallback.send(body);
+          protectedState.aborted = true;
+          protectedState.readyState = 0;
+          protectedState.response = null;
+          protectedState.responseHeaders = {};
+          protectedState.responseText = "";
+          protectedState.responseURL = "";
+          protectedState.status = 0;
+          protectedState.statusText = "";
+          xhr.dispatchEvent(makeXHREvent("abort"));
+          xhr.dispatchEvent(makeXHREvent("loadend"));
+        };
+
+        xhr.send = async (body = null) => {
+          if (!protectedState.active) {
+            nativeSend(body);
             return;
           }
 
           try {
             const nativeResponse = await nativeHandler.postMessage({
-              url: this._url,
-              method: this._method,
-              headers: this._headers,
+              url: protectedState.url,
+              method: protectedState.method,
+              headers: protectedState.headers,
               bodyBase64: await serializeBody(body),
               sourcePageURL: window.location.href,
               responseHandling: "response",
               requestSource: "xhr",
             });
 
-            this.status = nativeResponse.status;
-            this.statusText = nativeResponse.statusText;
-            this.responseURL = nativeResponse.url || this._url;
-            this._responseHeaders = Object.fromEntries(
+            if (protectedState.aborted || !protectedState.active) {
+              return;
+            }
+
+            protectedState.status = nativeResponse.status;
+            protectedState.statusText = nativeResponse.statusText;
+            protectedState.responseURL = nativeResponse.url || protectedState.url;
+            protectedState.responseHeaders = Object.fromEntries(
               Object.entries(nativeResponse.headers).map(([name, value]) => [name.toLowerCase(), value]),
             );
 
-            this._changeReadyState(2);
-            this._changeReadyState(3);
-            this._applyResponseBody(base64ToUint8Array(nativeResponse.bodyBase64));
-            this._changeReadyState(4);
-            this._dispatch("load");
-            this._dispatch("loadend");
+            changeProtectedReadyState(2);
+            changeProtectedReadyState(3);
+            applyProtectedXHRResponseBody(
+              protectedState,
+              base64ToUint8Array(nativeResponse.bodyBase64),
+            );
+            changeProtectedReadyState(4);
+            xhr.dispatchEvent(makeXHREvent("load"));
+            xhr.dispatchEvent(makeXHREvent("loadend"));
           } catch (error) {
-            this._changeReadyState(4);
-            this._dispatch("error", error);
-            this._dispatch("loadend");
-          }
-        }
-
-        _applyResponseBody(responseBytes) {
-          switch (this.responseType) {
-            case "arraybuffer":
-              this.response = responseBytes.buffer;
-              this.responseText = "";
-              break;
-            case "blob":
-              this.response = new Blob([responseBytes]);
-              this.responseText = "";
-              break;
-            case "json": {
-              const textValue = textDecoder.decode(responseBytes);
-              this.responseText = textValue;
-              this.response = textValue ? JSON.parse(textValue) : null;
-              break;
+            if (protectedState.aborted || !protectedState.active) {
+              return;
             }
-            case "":
-            case "text":
-            default: {
-              const textValue = textDecoder.decode(responseBytes);
-              this.responseText = textValue;
-              this.response = textValue;
-            }
+
+            changeProtectedReadyState(4);
+            xhr.dispatchEvent(makeXHREvent("error", error));
+            xhr.dispatchEvent(makeXHREvent("loadend"));
           }
-        }
+        };
 
-        _changeReadyState(nextState) {
-          this.readyState = nextState;
-          this._dispatch("readystatechange");
-        }
-
-        _dispatch(type, detail = null) {
-          const event = new Event(type);
-          event.detail = detail;
-
-          const propertyHandler = this[`on${type}`];
-          if (typeof propertyHandler === "function") {
-            propertyHandler.call(this, event);
-          }
-
-          this._listeners[type]?.forEach((listener) => {
-            listener.call(this, event);
-          });
-        }
-
-        _wireFallback() {
-          const eventNames = ["readystatechange", "load", "error", "loadend", "abort"];
-
-          eventNames.forEach((eventName) => {
-            this._fallback.addEventListener(eventName, (event) => {
-              this._syncFromFallback();
-              this._dispatch(eventName, event);
-            });
-          });
-        }
-
-        _syncFromFallback() {
-          this.readyState = this._fallback.readyState;
-          this.status = this._fallback.status;
-          this.statusText = this._fallback.statusText;
-          this.response = this._fallback.response;
-          this.responseType = this._fallback.responseType;
-          this.responseURL = this._fallback.responseURL;
-
-          try {
-            this.responseText = typeof this._fallback.responseText === "string"
-              ? this._fallback.responseText
-              : "";
-          } catch (_error) {
-            this.responseText = "";
-          }
-        }
+        return xhr;
       }
+
+      ["UNSENT", "OPENED", "HEADERS_RECEIVED", "LOADING", "DONE"].forEach((name) => {
+        const value = OriginalXMLHttpRequest[name];
+        if (typeof value !== "number") {
+          return;
+        }
+
+        Object.defineProperty(ApproovXMLHttpRequest, name, {
+          configurable: true,
+          enumerable: true,
+          value,
+          writable: false,
+        });
+      });
 
       document.addEventListener("click", (event) => {
         const clickedElement = event.target instanceof Element
@@ -645,11 +837,14 @@ package enum ApproovWebViewJavaScriptBridge {
         };
       }
 
-      window.XMLHttpRequest = ApproovXMLHttpRequest;
+      if (xhrBridgeEnabled) {
+        window.XMLHttpRequest = ApproovXMLHttpRequest;
+        window.XMLHttpRequest.prototype = OriginalXMLHttpRequest.prototype;
+      }
       window.__approovBridgeEnabled = true;
       window.__approovBridgeFeatures = {
         fetch: true,
-        xhr: true,
+        xhr: xhrBridgeEnabled,
         forms: true,
         cookieSync: true,
         simulatedNavigations: true,

@@ -2,7 +2,7 @@
 
 Swift Package Manager library for protecting selected `WKWebView` traffic with Approov on iOS.
 
-The package injects a JavaScript bridge into the page, intercepts protected `fetch`, `XMLHttpRequest`, and form submissions, executes those requests through `ApproovURLSession`, and returns the response to the page. Requests outside the configured allowlist stay on the normal WebKit networking stack.
+The package injects a JavaScript bridge into the page, intercepts protected `fetch`, optional `XMLHttpRequest`, and form submissions, executes those requests through `ApproovURLSession`, and returns the response to the page. Requests outside the configured allowlist stay on the normal WebKit networking stack.
 
 > [!IMPORTANT]
 > Only endpoints declared in `protectedEndpoints` are proxied through native networking and protected by Approov.
@@ -63,7 +63,7 @@ import ApproovServiceWebView
 | `ApproovWebView` | SwiftUI host for a protected `WKWebView`. |
 | `ApproovWebViewController` | UIKit host for the same bridge and request pipeline. |
 | `ApproovWebViewFactory` | Low-level API for creating or installing an Approov bridge on a raw `WKWebView`. |
-| `ApproovWebViewConfiguration` | Main integration surface for Approov setup, endpoint allowlisting, token header settings, fail-open policy, and native request mutation. |
+| `ApproovWebViewConfiguration` | Main integration surface for Approov setup, endpoint allowlisting, optional XHR interception, token header settings, fail-open policy, and native request mutation. |
 | `ApproovWebViewProtectedEndpoint` | Scheme, host, path-prefix, and excluded-path-prefix matcher for protected traffic. |
 | `ApproovWebViewContent` | Initial content source for the web view: request, HTML string, or file URL. |
 
@@ -92,6 +92,7 @@ Unmatched requests continue through WebKit unchanged.
 | `approovTokenHeaderPrefix` | Optional header prefix, for example `Bearer `. |
 | `approovDevelopmentKey` | Optional development key applied after initialization. |
 | `allowRequestsWithoutApproovToken` | Controls fail-open vs fail-closed behavior when Approov cannot produce a token. |
+| `interceptXMLHttpRequests` | Enables or disables JavaScript `XMLHttpRequest` interception. Default: `true`. |
 | `configureApproovService` | Hook for one-time Approov setup beyond the default initialization path. |
 | `mutateRequest` | Native-only request mutation point for secrets or headers that must not be exposed to page JavaScript. |
 | `debugLoggingEnabled` | Enables opt-in debug `OSLog` output for the native bridge lifecycle. |
@@ -222,6 +223,7 @@ and URL query strings.
 
 - Use `protectedEndpoints` to keep the native interception scope explicit and reviewable.
 - Use `excludedPathPrefixes` when you want to protect an entire host or broad path while allowing static assets or other public subpaths to stay on the normal WebKit stack.
+- Set `interceptXMLHttpRequests` to `false` if the host web app depends on native WebKit XHR behavior and only needs Approov protection for `fetch` or forms.
 - Keep secrets, API keys, and tenant-specific headers inside `mutateRequest`, not in page JavaScript.
 - Use `configureApproovService` if your app needs one-time Approov setup beyond a development key.
 - For reused base web views, install the bridge before the first protected navigation, or reload after installation.

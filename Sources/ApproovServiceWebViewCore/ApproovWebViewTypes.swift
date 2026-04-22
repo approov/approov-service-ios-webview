@@ -103,6 +103,12 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// networking and protected by `ApproovURLSession`.
     public let protectedEndpoints: [ApproovWebViewProtectedEndpoint]
 
+    /// Enables JavaScript `XMLHttpRequest` interception for protected traffic.
+    ///
+    /// Set this to `false` if the host web app relies on native WebKit XHR
+    /// behavior and only needs Approov interception for `fetch` or forms.
+    public let interceptXMLHttpRequests: Bool
+
     /// Gives the host app one place to run one-time Approov setup.
     ///
     /// Typical uses include setting a development key or enabling additional
@@ -132,6 +138,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         approovTokenHeaderPrefix: String = "",
         approovDevelopmentKey: String? = nil,
         allowRequestsWithoutApproovToken: Bool = false,
+        interceptXMLHttpRequests: Bool = true,
         configureApproovService: @escaping @Sendable () throws -> Void = {},
         mutateRequest: @escaping @Sendable (URLRequest) -> URLRequest = { $0 },
         debugLoggingEnabled: Bool = true,
@@ -145,6 +152,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         self.approovTokenHeaderPrefix = approovTokenHeaderPrefix
         self.approovDevelopmentKey = approovDevelopmentKey
         self.allowRequestsWithoutApproovToken = allowRequestsWithoutApproovToken
+        self.interceptXMLHttpRequests = interceptXMLHttpRequests
         self.configureApproovService = configureApproovService
         self.mutateRequest = mutateRequest
         self.debugLoggingEnabled = debugLoggingEnabled
