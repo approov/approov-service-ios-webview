@@ -137,7 +137,8 @@ public enum ApproovWebViewFactory {
                 installation.bridgeScriptSource == bridgeScriptSource,
                 """
                 ApproovWebViewFactory does not support reconfiguring an already-installed WKWebView.
-                Create a fresh WKWebView to change the bridge handler or protected endpoints.
+                Create a fresh WKWebView to change bridge script configuration such as the
+                handler name, protected endpoints, or XHR interception setting.
                 """
             )
             installation.coordinator.attach(webView: webView)
