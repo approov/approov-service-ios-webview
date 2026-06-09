@@ -98,6 +98,52 @@ Unmatched requests continue through WebKit unchanged.
 | `debugLoggingEnabled` | Enables opt-in debug `OSLog` output for the native bridge lifecycle. |
 | `bridgeHandlerName` | WebKit message handler name used by the injected bridge. |
 
+> [!IMPORTANT]
+> Keep `protectedEndpoints` as narrow as possible. The bridge should route only
+> endpoints that require an Approov token through native networking. Analytics,
+> reporting, static assets, and other non-protected traffic should stay on the
+> normal WebKit networking stack.
+
+Prefer allowlisting only the protected API paths:
+
+```swift
+ApproovWebViewConfiguration(
+    approovConfig: "<your-approov-config>",
+    protectedEndpoints: [
+        ApproovWebViewProtectedEndpoint(
+            host: "api.example.com",
+            pathPrefix: "/v1/protected"
+        )
+    ]
+)
+```
+
+Do not protect a whole host if only part of it needs Approov protection,
+especially when the same page also sends analytics or reporting traffic:
+
+```swift
+// Avoid this unless every request on the host requires Approov protection.
+ApproovWebViewProtectedEndpoint(
+    host: "www.example.com",
+    pathPrefix: "/"
+)
+```
+
+If protected and non-protected paths share a host, use `excludedPathPrefixes` to
+keep analytics, reporting, assets, and other public paths outside the bridge:
+
+```swift
+ApproovWebViewProtectedEndpoint(
+    host: "www.example.com",
+    pathPrefix: "/",
+    excludedPathPrefixes: [
+        "/analytics",
+        "/metrics",
+        "/assets"
+    ]
+)
+```
+
 ## Quick Start
 
 ```swift
@@ -229,18 +275,6 @@ and URL query strings.
 - For reused base web views, install the bridge before the first protected navigation, or reload after installation.
 - Keep `bridgeHandlerName` unique if your app already registers page-world `WKScriptMessageHandler`s on the same `WKUserContentController`.
 - Default behavior is fail-closed. Set `allowRequestsWithoutApproovToken` only when your use case explicitly requires fail-open handling.
-
-Example:
-
-```swift
-ApproovWebViewProtectedEndpoint(
-    host: "store.example.com",
-    pathPrefix: "/",
-    excludedPathPrefixes: [
-        "/assets/static"
-    ]
-)
-```
 
 ## Related Dependencies
 
