@@ -11,9 +11,18 @@ Released versions are tagged in git.
     bridge. The bridge script is injected into every frame of every page, so without this gate a
     third-party iframe or a navigated page could call the bridge and obtain Approov-stamped,
     secret-header-injected responses for protected endpoints. Rules support exact origins
-    (`https://example.com`), subdomain wildcards (`https://*.example.com`), and `*`. An empty list
-    keeps the previous allow-all behavior and logs a warning, so this is non-breaking; configuring
-    the origin(s) of your funnel is strongly recommended.
+    (`https://example.com`), subdomain wildcards (`https://*.example.com`), and `*`. Enforcement is
+    in the coordinator against the calling frame's security origin; the matcher rejects lookalike
+    hosts such as `notexample.com` and `example.com.evil.com`.
+### Changed
+  * **BREAKING:** `allowedOrigins` is now a required argument of `ApproovWebViewConfiguration.init`,
+    so the bridge trust boundary is a conscious choice, matching Android (which rejects a build with
+    no origin rules). Pass an empty list to keep the legacy allow-all behavior (a warning is logged),
+    or `["*"]` to explicitly allow any origin.
+### Fixed
+  * The bridge no longer leaks scope state: `ApproovWebViewServiceMutator` entries are removed when
+    the owning request executor is deallocated, so the static scope registry no longer grows for the
+    lifetime of the process and no longer retains configurations and their closures indefinitely.
 
 ## [0.5] - 2026-06-10
 ### Fixed

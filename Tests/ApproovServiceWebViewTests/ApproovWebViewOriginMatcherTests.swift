@@ -87,7 +87,8 @@ final class ApproovWebViewOriginMatcherTests: XCTestCase {
     func testConfigurationWithoutAllowlistDoesNotEnforce() {
         let configuration = ApproovWebViewConfiguration(
             approovConfig: "config",
-            protectedEndpoints: [ApproovWebViewProtectedEndpoint(host: "api.example.com", pathPrefix: "/v1")]
+            protectedEndpoints: [ApproovWebViewProtectedEndpoint(host: "api.example.com", pathPrefix: "/v1")],
+            allowedOrigins: []
         )
 
         XCTAssertFalse(configuration.enforcesOriginAllowlist)

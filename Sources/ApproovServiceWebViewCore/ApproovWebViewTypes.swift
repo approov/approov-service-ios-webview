@@ -112,8 +112,10 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// - `https://*.example.com` — `example.com` and any subdomain.
     /// - `*` — any origin (not recommended).
     ///
-    /// An empty list preserves the previous allow-all behavior and logs a
-    /// warning. Set it to the origin(s) that host your protected funnel.
+    /// This argument is required so the trust boundary is a conscious choice, as
+    /// it is on Android (which rejects a build with no origin rules). Passing an
+    /// empty list is the explicit escape hatch for the legacy allow-all behavior
+    /// and logs a warning; pass `["*"]` if you genuinely intend any origin.
     public let allowedOrigins: [String]
 
     /// Enables JavaScript `XMLHttpRequest` interception for protected traffic.
@@ -146,7 +148,7 @@ public struct ApproovWebViewConfiguration: Sendable {
     public init(
         approovConfig: String,
         protectedEndpoints: [ApproovWebViewProtectedEndpoint],
-        allowedOrigins: [String] = [],
+        allowedOrigins: [String],
         bridgeHandlerName: String = "approovBridge",
         approovTokenHeaderName: String = "approov-token",
         approovTokenHeaderPrefix: String = "",
