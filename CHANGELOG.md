@@ -5,7 +5,7 @@ All notable changes to this package are documented in this file.
 The format is based on Keep a Changelog and this package follows Semantic Versioning.
 Released versions are tagged in git.
 
-## [Unreleased]
+## [0.5] - 2026-06-10
 ### Added
   * `ApproovWebViewConfiguration.allowedOrigins` restricts which frame origins may invoke the native
     bridge. The bridge script is injected into every frame of every page, so without this gate a
@@ -24,9 +24,6 @@ Released versions are tagged in git.
   * The bridge no longer leaks scope state: `ApproovWebViewServiceMutator` entries are removed when
     the owning request executor is deallocated, so the static scope registry no longer grows for the
     lifetime of the process and no longer retains configurations and their closures indefinitely.
-
-## [0.5] - 2026-06-10
-### Fixed
   * Response cookies issued by a protected request are now persisted and attached to subsequent
     protected requests. The request executor previously assigned a bare `HTTPCookieStorage()`
     instance to the `URLSession` configuration; an `HTTPCookieStorage` created through its
