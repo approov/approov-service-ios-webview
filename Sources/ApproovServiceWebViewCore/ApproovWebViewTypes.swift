@@ -103,6 +103,22 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// networking and protected by `ApproovURLSession`.
     public let protectedEndpoints: [ApproovWebViewProtectedEndpoint]
 
+    /// The origins permitted to invoke the native bridge.
+    ///
+    /// The bridge script is injected into every frame of every page, so this
+    /// list is the trust boundary that decides *who* may ask the native layer to
+    /// produce Approov-stamped responses. Supported rule forms:
+    /// - `https://example.com` — that exact origin on the default HTTPS port.
+    /// - `https://example.com:8443` — that exact origin on port 8443.
+    /// - `https://*.example.com` — any subdomain of `example.com`.
+    /// - `*` — any origin (not recommended).
+    ///
+    /// This argument is required so the trust boundary is a conscious choice, as
+    /// it is on Android (which rejects a build with no origin rules). Passing an
+    /// empty list is the explicit escape hatch for the legacy allow-all behavior
+    /// and logs a warning; pass `["*"]` if you genuinely intend any origin.
+    public let allowedOrigins: [String]
+
     /// Enables JavaScript `XMLHttpRequest` interception for protected traffic.
     ///
     /// Set this to `false` if the host web app relies on native WebKit XHR
@@ -133,6 +149,7 @@ public struct ApproovWebViewConfiguration: Sendable {
     public init(
         approovConfig: String,
         protectedEndpoints: [ApproovWebViewProtectedEndpoint],
+        allowedOrigins: [String],
         bridgeHandlerName: String = "approovBridge",
         approovTokenHeaderName: String = "approov-token",
         approovTokenHeaderPrefix: String = "",
@@ -147,6 +164,7 @@ public struct ApproovWebViewConfiguration: Sendable {
     ) {
         self.approovConfig = approovConfig
         self.protectedEndpoints = protectedEndpoints
+        self.allowedOrigins = allowedOrigins
         self.bridgeHandlerName = bridgeHandlerName
         self.approovTokenHeaderName = approovTokenHeaderName
         self.approovTokenHeaderPrefix = approovTokenHeaderPrefix
@@ -162,5 +180,15 @@ public struct ApproovWebViewConfiguration: Sendable {
 
     public func isProtectedEndpoint(_ url: URL) -> Bool {
         protectedEndpoints.contains { $0.matches(url) }
+    }
+
+    /// Whether the bridge restricts callers to a configured origin allowlist.
+    public var enforcesOriginAllowlist: Bool {
+        !allowedOrigins.isEmpty
+    }
+
+    /// Returns `true` when a frame at `origin` is permitted to call the bridge.
+    public func isAllowedOrigin(_ origin: String) -> Bool {
+        ApproovWebViewOriginMatcher.matches(origin: origin, rules: allowedOrigins)
     }
 }

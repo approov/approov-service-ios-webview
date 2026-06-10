@@ -9,7 +9,8 @@ final class ApproovWebViewConfigurationTests: XCTestCase {
         )
         let configuration = ApproovWebViewConfiguration(
             approovConfig: "config",
-            protectedEndpoints: [endpoint]
+            protectedEndpoints: [endpoint],
+            allowedOrigins: []
         )
 
         XCTAssertEqual(configuration.bridgeHandlerName, "approovBridge")
@@ -32,6 +33,7 @@ final class ApproovWebViewConfigurationTests: XCTestCase {
         let configuration = ApproovWebViewConfiguration(
             approovConfig: "config",
             protectedEndpoints: [endpoint],
+            allowedOrigins: ["https://app.example.com"],
             bridgeHandlerName: "customBridge",
             approovTokenHeaderName: "x-approov-token",
             approovTokenHeaderPrefix: "Bearer ",

@@ -46,6 +46,12 @@ final actor ApproovWebViewRequestExecutor {
         logger.debug("Created native request executor with scope \(scopeID)")
     }
 
+    deinit {
+        // Release this executor's scope policy so the static registry does not
+        // grow unbounded as web views are created and destroyed.
+        ApproovWebViewServiceMutator.removeScope(scopeID)
+    }
+
     /// Executes a page-originated request natively.
     func execute(_ proxyRequest: ApproovWebViewProxyRequest) async throws -> ApproovWebViewExecutionResult {
         logger.debug("Starting native execution for \(proxyRequest.logDescription)")
@@ -182,21 +188,15 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Stores cookies set by the native response into the shared cookie jar.
-    ///
-    /// `HTTPURLResponse.allHeaderFields` folds multiple `Set-Cookie` headers into a
-    /// single comma-separated string; `HTTPCookie.cookies(withResponseHeaderFields:for:)`
-    /// is the Foundation API that knows how to parse that representation back into
-    /// individual cookies, including `HttpOnly` ones.
     private func storeResponseCookies(from response: HTTPURLResponse) {
         guard let url = response.url else {
             return
         }
 
-        let headerFields = response.allHeaderFields.reduce(into: [String: String]()) { result, entry in
-            result[String(describing: entry.key)] = String(describing: entry.value)
-        }
-
-        let cookies = HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: url)
+        let cookies = ApproovWebViewResponseCookies.cookies(
+            fromResponseHeaders: response.allHeaderFields,
+            url: url
+        )
         guard !cookies.isEmpty else {
             return
         }
