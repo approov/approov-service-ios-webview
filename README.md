@@ -114,7 +114,10 @@ ApproovWebViewConfiguration(
             host: "api.example.com",
             pathPrefix: "/v1/protected"
         )
-    ]
+    ],
+    // The frame origin(s) allowed to use the bridge. Required: set this to the
+    // origin that hosts your funnel so untrusted frames cannot call the bridge.
+    allowedOrigins: ["https://funnel.example.com"]
 )
 ```
 
@@ -159,6 +162,7 @@ struct ProtectedWebExperience: View {
                 pathPrefix: "/v1/private"
             )
         ],
+        allowedOrigins: ["https://funnel.example.com"],
         debugLoggingEnabled: true,
         approovDevelopmentKey: "<your-development-key>",
         mutateRequest: { request in
@@ -208,7 +212,8 @@ let configuration = ApproovWebViewConfiguration(
             host: "api.example.com",
             pathPrefix: "/v1/private"
         )
-    ]
+    ],
+    allowedOrigins: ["https://funnel.example.com"]
 )
 
 let webView = ApproovWebViewFactory.makeWebView(
