@@ -168,8 +168,13 @@ public enum ApproovWebViewFactory {
         let bridgeScript = WKUserScript(
             source: bridgeScriptSource,
             injectionTime: .atDocumentStart,
-            // Production pages often use iframes. Injecting into all frames
-            // gives the bridge coverage there as well.
+            // Production pages often use iframes, so the wrapper script is
+            // injected into all frames to cover protected calls made there. The
+            // security boundary is NOT this injection: it is the per-message
+            // origin check in ApproovWebViewCoordinator, which rejects calls from
+            // any frame outside configuration.allowedOrigins before a request is
+            // executed. An untrusted subframe therefore gets the wrapper but
+            // cannot obtain Approov-stamped responses.
             forMainFrameOnly: false
         )
 

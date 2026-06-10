@@ -13,7 +13,7 @@ import Foundation
 final actor ApproovWebViewRequestExecutor {
     private let configuration: ApproovWebViewConfiguration
     private let cookieBridge: ApproovWebViewCookieBridge
-    private let cookieStorage = HTTPCookieStorage()
+    private let cookieStorage: HTTPCookieStorage
     private let urlSession: ApproovURLSession
     private let logger: ApproovWebViewLogger
     private let scopeID = UUID().uuidString
@@ -28,13 +28,28 @@ final actor ApproovWebViewRequestExecutor {
         self.logger = ApproovWebViewLogger(configuration: configuration)
 
         let sessionConfiguration = URLSessionConfiguration.ephemeral
-        sessionConfiguration.httpCookieStorage = cookieStorage
+        // An ephemeral configuration ships with its own private, fully functional
+        // cookie store. A bare `HTTPCookieStorage()` created via its initializer is
+        // inert: `setCookie(_:)` is a no-op and it never captures `Set-Cookie`
+        // responses, so session cookies returned by one protected request were
+        // silently dropped and missing from every subsequent request. Reuse the
+        // configuration's own storage so the executor and `ApproovURLSession` share
+        // a single working jar.
+        let storage = sessionConfiguration.httpCookieStorage ?? HTTPCookieStorage.shared
+        sessionConfiguration.httpCookieStorage = storage
         sessionConfiguration.httpCookieAcceptPolicy = .always
         sessionConfiguration.httpShouldSetCookies = true
         sessionConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
         sessionConfiguration.urlCache = nil
+        self.cookieStorage = storage
         self.urlSession = ApproovURLSession(configuration: sessionConfiguration)
         logger.debug("Created native request executor with scope \(scopeID)")
+    }
+
+    deinit {
+        // Release this executor's scope policy so the static registry does not
+        // grow unbounded as web views are created and destroyed.
+        ApproovWebViewServiceMutator.removeScope(scopeID)
     }
 
     /// Executes a page-originated request natively.
@@ -63,6 +78,12 @@ final actor ApproovWebViewRequestExecutor {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ApproovWebViewBridgeError.nonHTTPResponse
         }
+
+        // Capture `Set-Cookie` from the response explicitly rather than relying on
+        // `URLSession`'s automatic cookie acceptance. The bridge owns cookie
+        // synchronization end to end, so harvesting here keeps behavior identical
+        // regardless of how `ApproovURLSession` configures its underlying session.
+        storeResponseCookies(from: httpResponse)
 
         await synchronizeCookiesBackIntoWebView()
         logger.debug(
@@ -166,6 +187,26 @@ final actor ApproovWebViewRequestExecutor {
         }
     }
 
+    /// Stores cookies set by the native response into the shared cookie jar.
+    private func storeResponseCookies(from response: HTTPURLResponse) {
+        guard let url = response.url else {
+            return
+        }
+
+        let cookies = ApproovWebViewResponseCookies.cookies(
+            fromResponseHeaders: response.allHeaderFields,
+            url: url
+        )
+        guard !cookies.isEmpty else {
+            return
+        }
+
+        logger.debug("Storing \(cookies.count) cookie(s) from native response into the shared jar")
+        for cookie in cookies {
+            cookieStorage.setCookie(cookie)
+        }
+    }
+
     /// Pushes cookies written during the native request back into WebKit.
     private func synchronizeCookiesBackIntoWebView() async {
         let nativeCookies = cookieStorage.cookies ?? []
@@ -252,11 +293,21 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Converts Foundation's heterogenous header map into JSON-safe values.
+    ///
+    /// `Set-Cookie` is deliberately withheld from the page-facing payload. Browsers
+    /// strip it from `fetch`/`XMLHttpRequest` visible headers so that `HttpOnly`
+    /// session cookies cannot be read by JavaScript; the bridge has already applied
+    /// those cookies to the shared jar natively, so the page never needs them.
     private func normalizeHeaders(_ rawHeaders: [AnyHashable: Any]) -> [String: String] {
         var headers: [String: String] = [:]
 
         for (key, value) in rawHeaders {
-            headers[String(describing: key)] = String(describing: value)
+            let name = String(describing: key)
+            if name.caseInsensitiveCompare("Set-Cookie") == .orderedSame {
+                continue
+            }
+
+            headers[name] = String(describing: value)
         }
 
         return headers

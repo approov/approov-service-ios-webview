@@ -71,6 +71,18 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
         request = mutableRequest as URLRequest
     }
 
+    /// Removes a scope's policy once its executor is torn down.
+    ///
+    /// Without this the static `scopePolicies` map grows for the lifetime of the
+    /// process — one entry per web view created — and keeps the captured
+    /// `ApproovWebViewConfiguration` and its closures (which may capture secrets)
+    /// alive indefinitely.
+    static func removeScope(_ scopeID: String) {
+        stateQueue.sync {
+            scopePolicies.removeValue(forKey: scopeID)
+        }
+    }
+
     private static func scopeID(for request: URLRequest) -> String? {
         URLProtocol.property(
             forKey: requestScopeProperty,

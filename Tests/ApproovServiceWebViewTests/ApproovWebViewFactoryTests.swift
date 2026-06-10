@@ -70,7 +70,8 @@ final class ApproovWebViewFactoryTests: XCTestCase {
                     host: "api.example.com",
                     pathPrefix: "/v1"
                 )
-            ]
+            ],
+            allowedOrigins: ["https://app.example.com"]
         )
     }
 }
