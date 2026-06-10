@@ -103,6 +103,19 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// networking and protected by `ApproovURLSession`.
     public let protectedEndpoints: [ApproovWebViewProtectedEndpoint]
 
+    /// The origins permitted to invoke the native bridge.
+    ///
+    /// The bridge script is injected into every frame of every page, so this
+    /// list is the trust boundary that decides *who* may ask the native layer to
+    /// produce Approov-stamped responses. Supported rule forms:
+    /// - `https://example.com` — that exact origin.
+    /// - `https://*.example.com` — `example.com` and any subdomain.
+    /// - `*` — any origin (not recommended).
+    ///
+    /// An empty list preserves the previous allow-all behavior and logs a
+    /// warning. Set it to the origin(s) that host your protected funnel.
+    public let allowedOrigins: [String]
+
     /// Enables JavaScript `XMLHttpRequest` interception for protected traffic.
     ///
     /// Set this to `false` if the host web app relies on native WebKit XHR
@@ -133,6 +146,7 @@ public struct ApproovWebViewConfiguration: Sendable {
     public init(
         approovConfig: String,
         protectedEndpoints: [ApproovWebViewProtectedEndpoint],
+        allowedOrigins: [String] = [],
         bridgeHandlerName: String = "approovBridge",
         approovTokenHeaderName: String = "approov-token",
         approovTokenHeaderPrefix: String = "",
@@ -147,6 +161,7 @@ public struct ApproovWebViewConfiguration: Sendable {
     ) {
         self.approovConfig = approovConfig
         self.protectedEndpoints = protectedEndpoints
+        self.allowedOrigins = allowedOrigins
         self.bridgeHandlerName = bridgeHandlerName
         self.approovTokenHeaderName = approovTokenHeaderName
         self.approovTokenHeaderPrefix = approovTokenHeaderPrefix
@@ -162,5 +177,15 @@ public struct ApproovWebViewConfiguration: Sendable {
 
     public func isProtectedEndpoint(_ url: URL) -> Bool {
         protectedEndpoints.contains { $0.matches(url) }
+    }
+
+    /// Whether the bridge restricts callers to a configured origin allowlist.
+    public var enforcesOriginAllowlist: Bool {
+        !allowedOrigins.isEmpty
+    }
+
+    /// Returns `true` when a frame at `origin` is permitted to call the bridge.
+    public func isAllowedOrigin(_ origin: String) -> Bool {
+        ApproovWebViewOriginMatcher.matches(origin: origin, rules: allowedOrigins)
     }
 }

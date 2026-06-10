@@ -5,6 +5,16 @@ All notable changes to this package are documented in this file.
 The format is based on Keep a Changelog and this package follows Semantic Versioning.
 Released versions are tagged in git.
 
+## [Unreleased]
+### Added
+  * `ApproovWebViewConfiguration.allowedOrigins` restricts which frame origins may invoke the native
+    bridge. The bridge script is injected into every frame of every page, so without this gate a
+    third-party iframe or a navigated page could call the bridge and obtain Approov-stamped,
+    secret-header-injected responses for protected endpoints. Rules support exact origins
+    (`https://example.com`), subdomain wildcards (`https://*.example.com`), and `*`. An empty list
+    keeps the previous allow-all behavior and logs a warning, so this is non-breaking; configuring
+    the origin(s) of your funnel is strongly recommended.
+
 ## [0.5] - 2026-06-10
 ### Fixed
   * Response cookies issued by a protected request are now persisted and attached to subsequent

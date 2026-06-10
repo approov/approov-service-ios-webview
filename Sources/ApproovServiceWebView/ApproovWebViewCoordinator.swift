@@ -10,6 +10,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private let logger: ApproovWebViewLogger
     private weak var webView: WKWebView?
     private var executor: ApproovWebViewRequestExecutor?
+    private var didWarnAboutMissingOriginAllowlist = false
 
     public init(configuration: ApproovWebViewConfiguration) {
         self.configuration = configuration
@@ -42,6 +43,13 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         guard let bodyDictionary = message.body as? [String: Any] else {
             logger.error("Received a bridge payload that was not a dictionary")
             replyHandler(nil, "The WebView bridge payload was not a dictionary.")
+            return
+        }
+
+        guard isAllowedFrame(message.frameInfo) else {
+            let origin = Self.originString(from: message.frameInfo.securityOrigin)
+            logger.error("Rejecting bridge message from a frame outside the allowed origins: \(origin)")
+            replyHandler(nil, "This origin is not allowed to use the Approov WebView bridge.")
             return
         }
 
@@ -103,6 +111,45 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                 "Failed to decode the WebView request: \(error.localizedDescription)"
             )
         }
+    }
+
+    /// Decides whether a frame is allowed to use the bridge.
+    ///
+    /// When no allowlist is configured the bridge stays backward compatible
+    /// (allow-all) but logs a warning once so the gap is visible. When an
+    /// allowlist is configured, the frame's security origin must match it.
+    private func isAllowedFrame(_ frameInfo: WKFrameInfo) -> Bool {
+        guard configuration.enforcesOriginAllowlist else {
+            warnAboutMissingOriginAllowlistIfNeeded()
+            return true
+        }
+
+        return configuration.isAllowedOrigin(Self.originString(from: frameInfo.securityOrigin))
+    }
+
+    private func warnAboutMissingOriginAllowlistIfNeeded() {
+        guard !didWarnAboutMissingOriginAllowlist else {
+            return
+        }
+
+        didWarnAboutMissingOriginAllowlist = true
+        logger.error(
+            """
+            No allowedOrigins configured: the Approov WebView bridge will accept calls from any \
+            frame, including third-party iframes. Set ApproovWebViewConfiguration.allowedOrigins to \
+            the origin(s) that host your protected funnel.
+            """
+        )
+    }
+
+    private static func originString(from securityOrigin: WKSecurityOrigin) -> String {
+        let scheme = securityOrigin.`protocol`
+        let host = securityOrigin.host
+        if securityOrigin.port == 0 {
+            return "\(scheme)://\(host)"
+        }
+
+        return "\(scheme)://\(host):\(securityOrigin.port)"
     }
 
     private func makeReplyObject(from response: ApproovWebViewProxyResponse) throws -> Any {
