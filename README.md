@@ -88,6 +88,7 @@ Unmatched requests continue through WebKit unchanged.
 | --- | --- |
 | `approovConfig` | Approov onboarding string for `ApproovService.initialize(...)`. |
 | `protectedEndpoints` | Strict allowlist for traffic that should be routed through native networking. |
+| `allowedOrigins` | Required frame-origin allowlist for callers permitted to use the native bridge. |
 | `approovTokenHeaderName` | Header name used for the Approov token. Default: `approov-token`. |
 | `approovTokenHeaderPrefix` | Optional header prefix, for example `Bearer `. |
 | `approovDevelopmentKey` | Optional development key applied after initialization. |

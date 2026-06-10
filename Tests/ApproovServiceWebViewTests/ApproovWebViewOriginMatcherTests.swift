@@ -21,9 +21,9 @@ final class ApproovWebViewOriginMatcherTests: XCTestCase {
         )
     }
 
-    func testWildcardSubdomainMatchesBaseAndSubdomains() {
+    func testWildcardSubdomainMatchesSubdomainsOnly() {
         let rules = ["https://*.example.com"]
-        XCTAssertTrue(ApproovWebViewOriginMatcher.matches(origin: "https://example.com", rules: rules))
+        XCTAssertFalse(ApproovWebViewOriginMatcher.matches(origin: "https://example.com", rules: rules))
         XCTAssertTrue(ApproovWebViewOriginMatcher.matches(origin: "https://www.example.com", rules: rules))
         XCTAssertTrue(ApproovWebViewOriginMatcher.matches(origin: "https://a.b.example.com", rules: rules))
     }
@@ -41,11 +41,23 @@ final class ApproovWebViewOriginMatcherTests: XCTestCase {
     }
 
     func testPortSemantics() {
-        // A rule without a port matches any port on the host.
+        // A rule without a port matches the scheme default port.
         XCTAssertTrue(
+            ApproovWebViewOriginMatcher.matches(origin: "https://example.com:443", rules: ["https://example.com"])
+        )
+        XCTAssertTrue(
+            ApproovWebViewOriginMatcher.matches(origin: "http://example.com:80", rules: ["http://example.com"])
+        )
+        XCTAssertFalse(
             ApproovWebViewOriginMatcher.matches(origin: "https://example.com:8443", rules: ["https://example.com"])
         )
         // A rule that pins a port only matches that port.
+        XCTAssertTrue(
+            ApproovWebViewOriginMatcher.matches(
+                origin: "https://example.com:8443",
+                rules: ["https://example.com:8443"]
+            )
+        )
         XCTAssertFalse(
             ApproovWebViewOriginMatcher.matches(
                 origin: "https://example.com:8443",
@@ -57,6 +69,15 @@ final class ApproovWebViewOriginMatcherTests: XCTestCase {
                 origin: "http://localhost:3000",
                 rules: ["http://localhost:3000"]
             )
+        )
+    }
+
+    func testMalformedPortIsRejectedWhenAllowlistConfigured() {
+        XCTAssertFalse(
+            ApproovWebViewOriginMatcher.matches(origin: "https://example.com:0", rules: ["https://example.com"])
+        )
+        XCTAssertFalse(
+            ApproovWebViewOriginMatcher.matches(origin: "https://example.com", rules: ["https://example.com:70000"])
         )
     }
 

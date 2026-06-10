@@ -108,8 +108,9 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// The bridge script is injected into every frame of every page, so this
     /// list is the trust boundary that decides *who* may ask the native layer to
     /// produce Approov-stamped responses. Supported rule forms:
-    /// - `https://example.com` — that exact origin.
-    /// - `https://*.example.com` — `example.com` and any subdomain.
+    /// - `https://example.com` — that exact origin on the default HTTPS port.
+    /// - `https://example.com:8443` — that exact origin on port 8443.
+    /// - `https://*.example.com` — any subdomain of `example.com`.
     /// - `*` — any origin (not recommended).
     ///
     /// This argument is required so the trust boundary is a conscious choice, as

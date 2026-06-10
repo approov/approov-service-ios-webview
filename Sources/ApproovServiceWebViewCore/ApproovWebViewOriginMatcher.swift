@@ -11,7 +11,7 @@ import Foundation
 /// Rule syntax mirrors the intent of Android's `allowedOriginRules`:
 /// - `*` matches any origin.
 /// - `https://example.com` matches that exact scheme/host (and port if given).
-/// - `https://*.example.com` matches `example.com` and any subdomain of it.
+/// - `https://*.example.com` matches any subdomain of `example.com`.
 package enum ApproovWebViewOriginMatcher {
     /// Returns `true` when `origin` is permitted by `rules`.
     ///
@@ -46,9 +46,10 @@ package enum ApproovWebViewOriginMatcher {
             return false
         }
 
-        // A rule that pins a port only matches that port; a rule without a port
-        // matches the candidate regardless of its port.
-        if let rulePort = ruleComponents.port, rulePort != candidate.port {
+        // A rule without an explicit port matches the scheme's default port.
+        // For example, `https://example.com` matches `https://example.com`
+        // and `https://example.com:443`, but not `https://example.com:8443`.
+        if effectivePort(for: ruleComponents) != effectivePort(for: candidate) {
             return false
         }
 
@@ -65,7 +66,22 @@ package enum ApproovWebViewOriginMatcher {
             return false
         }
 
-        return candidateHost == baseDomain || candidateHost.hasSuffix("." + baseDomain)
+        return candidateHost.hasSuffix("." + baseDomain)
+    }
+
+    private static func effectivePort(for components: Components) -> Int? {
+        if let port = components.port {
+            return port
+        }
+
+        switch components.scheme {
+        case "http":
+            return 80
+        case "https":
+            return 443
+        default:
+            return nil
+        }
     }
 
     /// Minimal origin parser. We avoid `URL`/`URLComponents` here because a host
@@ -94,7 +110,8 @@ package enum ApproovWebViewOriginMatcher {
             if let portSeparator = remainder.lastIndex(of: ":") {
                 host = String(remainder[remainder.startIndex..<portSeparator])
                 let portText = String(remainder[remainder.index(after: portSeparator)...])
-                guard let parsedPort = Int(portText) else {
+                guard let parsedPort = Int(portText),
+                      (1...65_535).contains(parsedPort) else {
                     return nil
                 }
 

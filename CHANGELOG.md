@@ -11,9 +11,10 @@ Released versions are tagged in git.
     bridge. The bridge script is injected into every frame of every page, so without this gate a
     third-party iframe or a navigated page could call the bridge and obtain Approov-stamped,
     secret-header-injected responses for protected endpoints. Rules support exact origins
-    (`https://example.com`), subdomain wildcards (`https://*.example.com`), and `*`. Enforcement is
-    in the coordinator against the calling frame's security origin; the matcher rejects lookalike
-    hosts such as `notexample.com` and `example.com.evil.com`.
+    (`https://example.com`), exact origins with explicit ports (`https://example.com:8443`),
+    subdomain wildcards (`https://*.example.com`), and `*`. Enforcement is in the coordinator
+    against the calling frame's security origin; the matcher rejects lookalike hosts such as
+    `notexample.com` and `example.com.evil.com`.
 ### Changed
   * **BREAKING:** `allowedOrigins` is now a required argument of `ApproovWebViewConfiguration.init`,
     so the bridge trust boundary is a conscious choice, matching Android (which rejects a build with
