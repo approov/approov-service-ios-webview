@@ -6,14 +6,14 @@ import Foundation
 ///
 /// This actor owns the stateful transport concerns:
 /// - lazy Approov initialization
-/// - cookie synchronization between WebKit and `URLSession`
+/// - cookie synchronization between WebKit and the isolated native jar
 /// - browser-context header reconstruction
 /// - execution through `ApproovURLSession`
 /// - mapping the result back into either JS response mode or navigation mode
 final actor ApproovWebViewRequestExecutor {
     private let configuration: ApproovWebViewConfiguration
     private let cookieBridge: ApproovWebViewCookieBridge
-    private let cookieStorage: HTTPCookieStorage
+    private let nativeCookieJar: ApproovWebViewNativeCookieJar
     private let urlSession: ApproovURLSession
     private let logger: ApproovWebViewLogger
     private let scopeID = UUID().uuidString
@@ -22,27 +22,16 @@ final actor ApproovWebViewRequestExecutor {
     init(
         configuration: ApproovWebViewConfiguration,
         cookieBridge: ApproovWebViewCookieBridge
-    ) {
+    ) throws {
         self.configuration = configuration
         self.cookieBridge = cookieBridge
         self.logger = ApproovWebViewLogger(configuration: configuration)
 
-        let sessionConfiguration = URLSessionConfiguration.ephemeral
-        // An ephemeral configuration ships with its own private, fully functional
-        // cookie store. A bare `HTTPCookieStorage()` created via its initializer is
-        // inert: `setCookie(_:)` is a no-op and it never captures `Set-Cookie`
-        // responses, so session cookies returned by one protected request were
-        // silently dropped and missing from every subsequent request. Reuse the
-        // configuration's own storage so the executor and `ApproovURLSession` share
-        // a single working jar.
-        let storage = sessionConfiguration.httpCookieStorage ?? HTTPCookieStorage.shared
-        sessionConfiguration.httpCookieStorage = storage
-        sessionConfiguration.httpCookieAcceptPolicy = .always
-        sessionConfiguration.httpShouldSetCookies = true
-        sessionConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        sessionConfiguration.urlCache = nil
-        self.cookieStorage = storage
-        self.urlSession = ApproovURLSession(configuration: sessionConfiguration)
+        let nativeCookieJar = try ApproovWebViewNativeCookieJar()
+        self.nativeCookieJar = nativeCookieJar
+        self.urlSession = ApproovURLSession(
+            configuration: nativeCookieJar.sessionConfiguration
+        )
         logger.debug("Created native request executor with scope \(scopeID)")
     }
 
@@ -68,10 +57,11 @@ final actor ApproovWebViewRequestExecutor {
             )
         }
 
-        try await synchronizeCookiesIntoNativeStorage()
+        await synchronizeCookiesIntoNativeStorage()
         try initializeApproovIfNeeded()
 
         var request = requestContext.request
+        nativeCookieJar.prepare(&request, for: requestContext.requestURL)
         ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &request)
 
         let (data, response) = try await performPinnedRequest(request)
@@ -153,8 +143,6 @@ final actor ApproovWebViewRequestExecutor {
             applyBrowserContextHeaders(to: &request, pageURL: pageURL)
         }
 
-        applyCookies(to: &request, for: requestURL)
-
         return (requestURL, request)
     }
 
@@ -174,57 +162,48 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Copies cookies from WebKit into native storage before each request.
-    private func synchronizeCookiesIntoNativeStorage() async throws {
+    private func synchronizeCookiesIntoNativeStorage() async {
+        let snapshotTicket = nativeCookieJar.beginWebKitSnapshot()
         let webCookies = await cookieBridge.allCookies()
-        logger.debug("Synchronizing \(webCookies.count) cookies from WebKit into native storage")
-
-        for cookie in cookieStorage.cookies ?? [] {
-            cookieStorage.deleteCookie(cookie)
+        guard nativeCookieJar.synchronizeFromWebKit(
+            webCookies,
+            snapshotTicket: snapshotTicket
+        ) else {
+            logger.debug(
+                "Ignoring stale WebKit cookie snapshot \(snapshotTicket)"
+            )
+            return
         }
 
-        for cookie in webCookies {
-            cookieStorage.setCookie(cookie)
-        }
+        logger.debug(
+            "Synchronized \(webCookies.count) cookies from WebKit into native storage"
+        )
     }
 
-    /// Stores cookies set by the native response into the shared cookie jar.
+    /// Stores cookies set by the native response into the isolated cookie jar.
     private func storeResponseCookies(from response: HTTPURLResponse) {
         guard let url = response.url else {
             return
         }
 
-        let cookies = ApproovWebViewResponseCookies.cookies(
+        let storedCookieCount = nativeCookieJar.storeResponseCookies(
             fromResponseHeaders: response.allHeaderFields,
             url: url
         )
-        guard !cookies.isEmpty else {
+        guard storedCookieCount > 0 else {
             return
         }
 
-        logger.debug("Storing \(cookies.count) cookie(s) from native response into the shared jar")
-        for cookie in cookies {
-            cookieStorage.setCookie(cookie)
-        }
+        logger.debug(
+            "Stored \(storedCookieCount) cookie(s) from native response into the isolated jar"
+        )
     }
 
     /// Pushes cookies written during the native request back into WebKit.
     private func synchronizeCookiesBackIntoWebView() async {
-        let nativeCookies = cookieStorage.cookies ?? []
+        let nativeCookies = nativeCookieJar.allCookies
         logger.debug("Synchronizing \(nativeCookies.count) cookies from native storage back into WebKit")
         await cookieBridge.setCookies(nativeCookies)
-    }
-
-    /// Applies a `Cookie` header if JavaScript did not supply one already.
-    private func applyCookies(to request: inout URLRequest, for url: URL) {
-        guard request.value(forHTTPHeaderField: "Cookie") == nil,
-              let cookies = cookieStorage.cookies(for: url),
-              !cookies.isEmpty else {
-            return
-        }
-
-        for (headerName, headerValue) in HTTPCookie.requestHeaderFields(with: cookies) {
-            request.setValue(headerValue, forHTTPHeaderField: headerName)
-        }
     }
 
     /// Initializes Approov lazily the first time protected traffic is sent.

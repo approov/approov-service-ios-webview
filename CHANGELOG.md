@@ -5,6 +5,18 @@ All notable changes to this package are documented in this file.
 The format is based on Keep a Changelog and this package follows Semantic Versioning.
 Released versions are tagged in git.
 
+## [0.5.1] - 2026-07-27
+### Fixed
+  * Concurrent protected WebView requests no longer share their native `HTTPCookieStorage` with
+    `URLSession`. The bridge now retains the ephemeral configuration's working cookie store but
+    detaches it from `ApproovURLSession`, disables automatic cookie handling, and manages request
+    and response cookies exclusively inside the request executor. This prevents a CFNetwork race
+    in `CompactCookieArray::_mungeCookies` that could crash when overlapping requests updated the
+    same cookie jar.
+  * WebKit cookies are synchronized before the protected request's `Cookie` header is constructed,
+    so the request no longer uses the previous native snapshot. Snapshot reconciliation also
+    preserves newer response cookies while propagating cookies deleted by WebKit.
+
 ## [0.5] - 2026-06-10
 ### Added
   * `ApproovWebViewConfiguration.allowedOrigins` restricts which frame origins may invoke the native

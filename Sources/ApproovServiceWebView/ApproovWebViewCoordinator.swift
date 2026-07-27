@@ -10,6 +10,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private let logger: ApproovWebViewLogger
     private weak var webView: WKWebView?
     private var executor: ApproovWebViewRequestExecutor?
+    private var executorInitializationError: Error?
     private var didWarnAboutMissingOriginAllowlist = false
 
     public init(configuration: ApproovWebViewConfiguration) {
@@ -27,12 +28,21 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
             """
         )
         self.webView = webView
-        self.executor = ApproovWebViewRequestExecutor(
-            configuration: configuration,
-            cookieBridge: ApproovWebViewCookieBridge(
-                store: webView.configuration.websiteDataStore.httpCookieStore
+        do {
+            self.executor = try ApproovWebViewRequestExecutor(
+                configuration: configuration,
+                cookieBridge: ApproovWebViewCookieBridge(
+                    store: webView.configuration.websiteDataStore.httpCookieStore
+                )
             )
-        )
+            self.executorInitializationError = nil
+        } catch {
+            self.executor = nil
+            self.executorInitializationError = error
+            logger.error(
+                "Failed to initialize the native request executor: \(error.localizedDescription)"
+            )
+        }
     }
 
     public func userContentController(
@@ -59,7 +69,11 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
         guard let executor else {
             logger.error("Received bridge message before the native executor was attached")
-            replyHandler(nil, "The native bridge is not ready yet.")
+            replyHandler(
+                nil,
+                executorInitializationError?.localizedDescription
+                    ?? "The native bridge is not ready yet."
+            )
             return
         }
 
