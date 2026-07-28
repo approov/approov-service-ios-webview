@@ -10,8 +10,14 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private let logger: ApproovWebViewLogger
     private weak var webView: WKWebView?
     private var executor: ApproovWebViewRequestExecutor?
-    private var executorInitializationError: Error?
     private var didWarnAboutMissingOriginAllowlist = false
+
+    /// The failure that stopped the native bridge from initializing, if any.
+    ///
+    /// `ApproovWebViewFactory`'s entry points are not throwing, so this is how
+    /// a host detects a bridge that will reject every protected request instead
+    /// of discovering it when the page makes its first call.
+    public private(set) var bridgeInitializationError: Error?
 
     public init(configuration: ApproovWebViewConfiguration) {
         self.configuration = configuration
@@ -21,6 +27,17 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     /// Attaches the concrete `WKWebView` after construction so the
     /// request-execution pipeline can reuse the WebKit cookie store.
     func attach(webView: WKWebView) {
+        // Reinstallation on an already-attached web view must not rebuild the
+        // executor: a fresh executor means a fresh cookie jar, which discards
+        // any tombstone still waiting to be mirrored into WebKit and re-runs
+        // lazy Approov initialization.
+        if self.webView === webView, executor != nil {
+            logger.debug(
+                "Coordinator is already attached to this web view; keeping the existing executor"
+            )
+            return
+        }
+
         logger.debug(
             """
             Attaching coordinator to web view with handler '\(configuration.bridgeHandlerName)' \
@@ -35,10 +52,10 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                     store: webView.configuration.websiteDataStore.httpCookieStore
                 )
             )
-            self.executorInitializationError = nil
+            self.bridgeInitializationError = nil
         } catch {
             self.executor = nil
-            self.executorInitializationError = error
+            self.bridgeInitializationError = error
             logger.error(
                 "Failed to initialize the native request executor: \(error.localizedDescription)"
             )
@@ -68,10 +85,20 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         }
 
         guard let executor else {
-            logger.error("Received bridge message before the native executor was attached")
+            if let bridgeInitializationError {
+                logger.error(
+                    """
+                    Rejecting bridge message: the native executor failed to initialize: \
+                    \(bridgeInitializationError.localizedDescription)
+                    """
+                )
+            } else {
+                logger.error("Received bridge message before the native executor was attached")
+            }
+
             replyHandler(
                 nil,
-                executorInitializationError?.localizedDescription
+                bridgeInitializationError?.localizedDescription
                     ?? "The native bridge is not ready yet."
             )
             return
