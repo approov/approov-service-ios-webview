@@ -80,7 +80,7 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
                 ],
                 url: apiURL
             ),
-            1
+            .init(storedCount: 1, deletedCount: 0)
         )
         XCTAssertEqual(jar.allCookies.first?.value, "abc123")
         XCTAssertTrue(try XCTUnwrap(jar.allCookies.first).isHTTPOnly)
@@ -97,11 +97,14 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         XCTAssertEqual(jar.allCookies.first?.value, "replaced")
         XCTAssertNotNil(jar.allCookies.first?.expiresDate)
 
-        jar.storeResponseCookies(
-            fromResponseHeaders: [
-                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
-            ],
-            url: apiURL
+        XCTAssertEqual(
+            jar.storeResponseCookies(
+                fromResponseHeaders: [
+                    "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+                ],
+                url: apiURL
+            ),
+            .init(storedCount: 0, deletedCount: 1)
         )
         XCTAssertTrue(jar.allCookies.isEmpty)
     }
@@ -152,8 +155,9 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
             Set(["existing", "response"])
         )
 
-        // Once WebKit has observed the response cookie, a new snapshot that
-        // omits it propagates the deletion back to the native jar.
+        // Once the bridge has mirrored the response cookie into WebKit, a new
+        // snapshot that omits it propagates the deletion back to the native jar.
+        jar.completeWebKitFlush()
         synchronize(jar, fromWebKit: [existingCookie])
         XCTAssertEqual(jar.allCookies.map(\.name), ["existing"])
     }
@@ -208,8 +212,82 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
         // This ordered post-mutation snapshot confirms that WebKit observed
         // the bridge deletion and releases the tombstone.
+        jar.completeWebKitFlush()
         synchronize(jar, fromWebKit: [])
         XCTAssertTrue(jar.allCookies.isEmpty)
+        XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
+    }
+
+    /// A snapshot reserved *after* the response still cannot be trusted until
+    /// the bridge has mirrored the mutation, because its WebKit read may have
+    /// been served before the delete/set pair landed.
+    func testSnapshotReservedAfterServerDeletionCannotResurrectBeforeFlush() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        let sessionCookie = makeCookie(
+            name: "session",
+            value: "authenticated"
+        )
+        synchronize(jar, fromWebKit: [sessionCookie])
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        XCTAssertTrue(jar.isAwaitingWebKitFlush)
+
+        // Reserved after the response, but read before the mirror was applied,
+        // so WebKit still reports the cookie.
+        XCTAssertTrue(
+            jar.synchronizeFromWebKit(
+                [sessionCookie],
+                snapshotTicket: jar.beginWebKitSnapshot()
+            )
+        )
+        XCTAssertTrue(jar.allCookies.isEmpty)
+        XCTAssertEqual(jar.webKitCookiesToDelete.map(\.name), ["session"])
+
+        // A snapshot still in flight when the mirror completed is also ignored.
+        let inFlightTicket = jar.beginWebKitSnapshot()
+        jar.completeWebKitFlush()
+        XCTAssertFalse(jar.isAwaitingWebKitFlush)
+        XCTAssertTrue(
+            jar.synchronizeFromWebKit(
+                [sessionCookie],
+                snapshotTicket: inFlightTicket
+            )
+        )
+        XCTAssertTrue(jar.allCookies.isEmpty)
+
+        // Only a snapshot reserved after the mirror releases the barrier.
+        synchronize(jar, fromWebKit: [])
+        XCTAssertTrue(jar.allCookies.isEmpty)
+        XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
+    }
+
+    /// Once the mirror has been applied WebKit is authoritative again: a cookie
+    /// the page legitimately re-created after the server deletion comes back
+    /// rather than being suppressed forever.
+    func testWebKitBecomesAuthoritativeAgainAfterTheFlush() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        let sessionCookie = makeCookie(
+            name: "session",
+            value: "authenticated"
+        )
+        synchronize(jar, fromWebKit: [sessionCookie])
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        jar.completeWebKitFlush()
+
+        let recreated = makeCookie(name: "session", value: "recreated")
+        synchronize(jar, fromWebKit: [recreated])
+
+        XCTAssertEqual(jar.allCookies.map(\.value), ["recreated"])
         XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
     }
 
@@ -394,6 +472,7 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         // Simulate the ordered WebKit delete/set round trip and its following
         // snapshot. This confirms the barriers and tombstones are released
         // without resurrecting either server-deleted identity.
+        await harness.completeWebKitFlush()
         let appliedConfirmation = await harness.synchronizeFromWebKit(cookies)
         XCTAssertTrue(appliedConfirmation)
         cookies = await harness.allCookies()
@@ -487,6 +566,10 @@ private actor NativeCookieHarness {
 
     func webKitCookiesToDelete() -> [HTTPCookie] {
         jar.webKitCookiesToDelete
+    }
+
+    func completeWebKitFlush() {
+        jar.completeWebKitFlush()
     }
 
     func synchronizeFromWebKit(

@@ -181,25 +181,37 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Stores cookies set by the native response into the isolated cookie jar.
+    ///
+    /// Every mutation recorded here is held behind a barrier until
+    /// `synchronizeCookiesBackIntoWebView()` has mirrored it into WebKit, so a
+    /// concurrent request's snapshot cannot resurrect a server deletion.
     private func storeResponseCookies(from response: HTTPURLResponse) {
         guard let url = response.url else {
             return
         }
 
-        let storedCookieCount = nativeCookieJar.storeResponseCookies(
+        let outcome = nativeCookieJar.storeResponseCookies(
             fromResponseHeaders: response.allHeaderFields,
             url: url
         )
-        guard storedCookieCount > 0 else {
+        guard !outcome.isEmpty else {
             return
         }
 
         logger.debug(
-            "Stored \(storedCookieCount) cookie(s) from native response into the isolated jar"
+            """
+            Applied native response cookies to the isolated jar: \
+            stored \(outcome.storedCount), deleted \(outcome.deletedCount)
+            """
         )
     }
 
     /// Pushes cookies written during the native request back into WebKit.
+    ///
+    /// `completeWebKitFlush()` must run once the bridge has applied the ordered
+    /// delete/set pair and must not be skipped, otherwise the mutated
+    /// identities stay barriered and later WebKit edits to them are ignored.
+    /// The `defer` keeps that true even if this task is cancelled.
     private func synchronizeCookiesBackIntoWebView() async {
         let nativeCookies = nativeCookieJar.allCookies
         let cookiesToDelete = nativeCookieJar.webKitCookiesToDelete
@@ -209,6 +221,7 @@ final actor ApproovWebViewRequestExecutor {
             after deleting \(cookiesToDelete.count) cookie(s)
             """
         )
+        defer { nativeCookieJar.completeWebKitFlush() }
         await cookieBridge.synchronize(
             deleting: cookiesToDelete,
             setting: nativeCookies
