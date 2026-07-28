@@ -158,15 +158,189 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         XCTAssertEqual(jar.allCookies.map(\.name), ["existing"])
     }
 
-    func testConcurrentTransportKeepsCookieJarOutOfCFNetwork() async throws {
-        CookieResponseURLProtocol.reset()
+    func testServerDeletionRemovesNativeCookieAndCreatesWebKitTombstone() throws {
         let jar = try ApproovWebViewNativeCookieJar()
+        let sessionCookie = makeCookie(
+            name: "session",
+            value: "authenticated"
+        )
+        synchronize(jar, fromWebKit: [sessionCookie])
+
         jar.storeResponseCookies(
             fromResponseHeaders: [
-                "Set-Cookie": "replacement=initial; Path=/; HttpOnly"
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
             ],
             url: apiURL
         )
+
+        XCTAssertTrue(jar.allCookies.isEmpty)
+        let deletionCookie = try XCTUnwrap(
+            jar.webKitCookiesToDelete.first
+        )
+        XCTAssertEqual(deletionCookie.name, "session")
+        XCTAssertEqual(deletionCookie.value, "authenticated")
+    }
+
+    func testSnapshotStartedBeforeServerDeletionCannotResurrectCookie() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        let sessionCookie = makeCookie(
+            name: "session",
+            value: "authenticated"
+        )
+        synchronize(jar, fromWebKit: [sessionCookie])
+        let staleSnapshotTicket = jar.beginWebKitSnapshot()
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+
+        XCTAssertTrue(
+            jar.synchronizeFromWebKit(
+                [sessionCookie],
+                snapshotTicket: staleSnapshotTicket
+            )
+        )
+        XCTAssertTrue(jar.allCookies.isEmpty)
+        XCTAssertEqual(jar.webKitCookiesToDelete.map(\.name), ["session"])
+
+        // This ordered post-mutation snapshot confirms that WebKit observed
+        // the bridge deletion and releases the tombstone.
+        synchronize(jar, fromWebKit: [])
+        XCTAssertTrue(jar.allCookies.isEmpty)
+        XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
+    }
+
+    func testStaleSnapshotCannotOverwriteResponseReplacement() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        let oldCookie = makeCookie(name: "session", value: "old")
+        synchronize(jar, fromWebKit: [oldCookie])
+        let staleSnapshotTicket = jar.beginWebKitSnapshot()
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=new; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+
+        XCTAssertTrue(
+            jar.synchronizeFromWebKit(
+                [oldCookie],
+                snapshotTicket: staleSnapshotTicket
+            )
+        )
+        XCTAssertEqual(jar.allCookies.first?.value, "new")
+
+        let newCookie = try XCTUnwrap(jar.allCookies.first)
+        synchronize(jar, fromWebKit: [newCookie])
+        XCTAssertEqual(jar.allCookies.first?.value, "new")
+    }
+
+    func testLatestResponseWinsForDeleteAndReplacementSequences() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        synchronize(jar, fromWebKit: [
+            makeCookie(name: "session", value: "initial")
+        ])
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=replacement; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+
+        XCTAssertEqual(jar.allCookies.first?.value, "replacement")
+        XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=newer; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+
+        XCTAssertTrue(jar.allCookies.isEmpty)
+        XCTAssertEqual(jar.webKitCookiesToDelete.map(\.name), ["session"])
+    }
+
+    func testPreparedRequestExcludesServerDeletedCookie() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        synchronize(jar, fromWebKit: [
+            makeCookie(name: "session", value: "authenticated")
+        ])
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        var request = URLRequest(url: apiURL)
+
+        jar.prepare(&request, for: apiURL)
+
+        XCTAssertFalse(request.httpShouldHandleCookies)
+        XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+    }
+
+    func testDeletionLeavesIndependentDomainAndPathIdentitiesUntouched() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        synchronize(jar, fromWebKit: [
+            makeCookie(name: "session", value: "root"),
+            makeCookie(
+                name: "session",
+                value: "scoped",
+                path: "/account"
+            ),
+            makeCookie(
+                name: "session",
+                value: "other-domain",
+                domain: "other.example.com"
+            )
+        ])
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+
+        XCTAssertEqual(
+            Set(jar.allCookies.map { "\($0.domain)\($0.path)=\($0.value)" }),
+            Set([
+                "api.example.com/account=scoped",
+                "other.example.com/=other-domain"
+            ])
+        )
+        XCTAssertEqual(jar.webKitCookiesToDelete.count, 1)
+        XCTAssertEqual(jar.webKitCookiesToDelete.first?.path, "/")
+    }
+
+    func testConcurrentMixedResponsesDoNotResurrectDeletedCookies() async throws {
+        CookieResponseURLProtocol.reset()
+        let jar = try ApproovWebViewNativeCookieJar()
+        let initialWebKitCookies = [
+            makeCookie(name: "replacement", value: "initial"),
+            makeCookie(name: "delete-me", value: "authenticated"),
+            makeCookie(name: "expire-me", value: "authenticated")
+        ]
+        synchronize(jar, fromWebKit: initialWebKitCookies)
+        let staleSnapshotTicket = jar.beginWebKitSnapshot()
         jar.sessionConfiguration.protocolClasses = [
             CookieResponseURLProtocol.self
         ]
@@ -196,13 +370,48 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
             try await group.waitForAll()
         }
 
-        let cookies = await harness.allCookies()
-        XCTAssertEqual(cookies.count, 100)
-        XCTAssertEqual(Set(cookies.map(\.name)).count, 100)
+        // A WebKit read that began before the responses cannot reintroduce
+        // either deleted cookie or restore the old replacement value.
+        let appliedStaleSnapshot = await harness.synchronizeFromWebKit(
+            initialWebKitCookies,
+            snapshotTicket: staleSnapshotTicket
+        )
+        XCTAssertTrue(appliedStaleSnapshot)
+        var cookies = await harness.allCookies()
+        XCTAssertEqual(cookies.count, 98)
+        XCTAssertEqual(Set(cookies.map(\.name)).count, 98)
         XCTAssertEqual(
             cookies.first { $0.name == "replacement" }?.value,
             "value99"
         )
+        XCTAssertFalse(cookies.contains { $0.name == "delete-me" })
+        XCTAssertFalse(cookies.contains { $0.name == "expire-me" })
+        let pendingDeletionNames = Set(
+            await harness.webKitCookiesToDelete().map(\.name)
+        )
+        XCTAssertEqual(pendingDeletionNames, Set(["delete-me", "expire-me"]))
+
+        // Simulate the ordered WebKit delete/set round trip and its following
+        // snapshot. This confirms the barriers and tombstones are released
+        // without resurrecting either server-deleted identity.
+        let appliedConfirmation = await harness.synchronizeFromWebKit(cookies)
+        XCTAssertTrue(appliedConfirmation)
+        cookies = await harness.allCookies()
+        XCTAssertEqual(cookies.count, 98)
+        XCTAssertFalse(cookies.contains { $0.name == "delete-me" })
+        XCTAssertFalse(cookies.contains { $0.name == "expire-me" })
+        let pendingDeletionsAfterConfirmation =
+            await harness.webKitCookiesToDelete()
+        XCTAssertTrue(pendingDeletionsAfterConfirmation.isEmpty)
+
+        let preparedRequest = await harness.prepareRequest(for: apiURL)
+        let finalCookieHeader = preparedRequest.value(
+            forHTTPHeaderField: "Cookie"
+        ) ?? ""
+        XCTAssertFalse(finalCookieHeader.contains("delete-me="))
+        XCTAssertFalse(finalCookieHeader.contains("expire-me="))
+        XCTAssertTrue(finalCookieHeader.contains("replacement=value99"))
+
         XCTAssertEqual(CookieResponseURLProtocol.requestCount, 100)
         XCTAssertGreaterThan(CookieResponseURLProtocol.maximumConcurrentCount, 1)
         XCTAssertTrue(
@@ -275,6 +484,20 @@ private actor NativeCookieHarness {
     func allCookies() -> [HTTPCookie] {
         jar.allCookies
     }
+
+    func webKitCookiesToDelete() -> [HTTPCookie] {
+        jar.webKitCookiesToDelete
+    }
+
+    func synchronizeFromWebKit(
+        _ cookies: [HTTPCookie],
+        snapshotTicket: UInt64? = nil
+    ) -> Bool {
+        jar.synchronizeFromWebKit(
+            cookies,
+            snapshotTicket: snapshotTicket ?? jar.beginWebKitSnapshot()
+        )
+    }
 }
 
 private final class CookieResponseURLProtocol: URLProtocol {
@@ -338,9 +561,7 @@ private final class CookieResponseURLProtocol: URLProtocol {
             statusCode: 200,
             httpVersion: "HTTP/1.1",
             headerFields: [
-                "Set-Cookie": index == 99
-                    ? "replacement=value99; Path=/; HttpOnly"
-                    : "cookie\(index)=value\(index); Path=/; HttpOnly"
+                "Set-Cookie": Self.responseCookieHeader(for: index)
             ]
         )!
 
@@ -367,6 +588,22 @@ private final class CookieResponseURLProtocol: URLProtocol {
     private static func finishRequest() {
         stateLock.withLock {
             activeRequestCount -= 1
+        }
+    }
+
+    private static func responseCookieHeader(for index: Int) -> String {
+        switch index {
+        case 96:
+            return "delete-me=; Max-Age=0; Path=/; HttpOnly"
+        case 97:
+            return """
+            expire-me=gone; Expires=Thu, 01 Jan 1970 00:00:00 GMT; \
+            Path=/; HttpOnly
+            """
+        case 99:
+            return "replacement=value99; Path=/; HttpOnly"
+        default:
+            return "cookie\(index)=value\(index); Path=/; HttpOnly"
         }
     }
 }

@@ -36,6 +36,8 @@ package final class ApproovWebViewNativeCookieJar {
     private var previousWebKitCookieIdentities: Set<CookieIdentity> = []
     private var nextWebKitSnapshotTicket: UInt64 = 0
     private var lastAppliedWebKitSnapshotTicket: UInt64 = 0
+    private var responseMutationBarriers: [CookieIdentity: UInt64] = [:]
+    private var pendingWebKitDeletions: [CookieIdentity: HTTPCookie] = [:]
 
     package init(
         sessionConfiguration: URLSessionConfiguration = .ephemeral
@@ -61,6 +63,10 @@ package final class ApproovWebViewNativeCookieJar {
         storage.cookies ?? []
     }
 
+    package var webKitCookiesToDelete: [HTTPCookie] {
+        Array(pendingWebKitDeletions.values)
+    }
+
     /// Reserves ordering for a WebKit snapshot before its asynchronous read.
     package func beginWebKitSnapshot() -> UInt64 {
         nextWebKitSnapshotTicket += 1
@@ -68,8 +74,14 @@ package final class ApproovWebViewNativeCookieJar {
     }
 
     /// Reconciles a WebKit snapshot if no newer asynchronous read has already
-    /// completed. This also avoids deleting response cookies that were added
-    /// after the snapshot was requested.
+    /// completed.
+    ///
+    /// A response mutation establishes an identity-specific barrier at the
+    /// latest snapshot ticket that had already been reserved. Values and
+    /// absences from those snapshots are ignored for that identity, preventing
+    /// a late WebKit callback from undoing a server deletion or replacement.
+    /// The first later snapshot is read only after the bridge's ordered
+    /// delete/set operation and therefore confirms the response mutation.
     @discardableResult
     package func synchronizeFromWebKit(
         _ cookies: [HTTPCookie],
@@ -80,8 +92,24 @@ package final class ApproovWebViewNativeCookieJar {
         }
 
         let currentIdentities = Set(cookies.map(CookieIdentity.init))
+        let protectedIdentities = Set(
+            responseMutationBarriers.compactMap { identity, barrier in
+                snapshotTicket <= barrier ? identity : nil
+            }
+        )
+        let confirmedIdentities = responseMutationBarriers.compactMap {
+            identity, barrier in
+            snapshotTicket > barrier ? identity : nil
+        }
+
+        for identity in confirmedIdentities {
+            responseMutationBarriers.removeValue(forKey: identity)
+            pendingWebKitDeletions.removeValue(forKey: identity)
+        }
+
         let deletedIdentities = previousWebKitCookieIdentities
             .subtracting(currentIdentities)
+            .subtracting(protectedIdentities)
 
         if !deletedIdentities.isEmpty {
             for cookie in storage.cookies ?? []
@@ -90,7 +118,8 @@ package final class ApproovWebViewNativeCookieJar {
             }
         }
 
-        for cookie in cookies {
+        for cookie in cookies
+        where !protectedIdentities.contains(CookieIdentity(cookie)) {
             storage.setCookie(cookie)
         }
 
@@ -127,10 +156,17 @@ package final class ApproovWebViewNativeCookieJar {
         )
 
         for cookie in cookies {
+            let identity = CookieIdentity(cookie)
+            responseMutationBarriers[identity] = nextWebKitSnapshotTicket
+
             if let expiresDate = cookie.expiresDate, expiresDate <= Date() {
-                deleteCookie(withIdentity: CookieIdentity(cookie))
+                let deletionCookie = storedCookie(withIdentity: identity)
+                    ?? cookie
+                deleteCookie(withIdentity: identity)
+                pendingWebKitDeletions[identity] = deletionCookie
             } else {
                 storage.setCookie(cookie)
+                pendingWebKitDeletions.removeValue(forKey: identity)
             }
         }
 
@@ -141,6 +177,14 @@ package final class ApproovWebViewNativeCookieJar {
         for cookie in storage.cookies ?? []
         where CookieIdentity(cookie) == identity {
             storage.deleteCookie(cookie)
+        }
+    }
+
+    private func storedCookie(
+        withIdentity identity: CookieIdentity
+    ) -> HTTPCookie? {
+        (storage.cookies ?? []).first {
+            CookieIdentity($0) == identity
         }
     }
 }

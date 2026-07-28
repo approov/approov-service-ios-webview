@@ -15,7 +15,9 @@ Released versions are tagged in git.
     same cookie jar.
   * WebKit cookies are synchronized before the protected request's `Cookie` header is constructed,
     so the request no longer uses the previous native snapshot. Snapshot reconciliation also
-    preserves newer response cookies while propagating cookies deleted by WebKit.
+    preserves newer response cookies while propagating cookies deleted by WebKit. Server-driven
+    expiration and deletion are now mirrored into WebKit explicitly, and per-cookie mutation
+    barriers prevent late WebKit snapshots from resurrecting deletions or overwriting replacements.
 
 ## [0.5] - 2026-06-10
 ### Added

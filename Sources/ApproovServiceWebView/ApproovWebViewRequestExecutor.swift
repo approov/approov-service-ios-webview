@@ -202,8 +202,17 @@ final actor ApproovWebViewRequestExecutor {
     /// Pushes cookies written during the native request back into WebKit.
     private func synchronizeCookiesBackIntoWebView() async {
         let nativeCookies = nativeCookieJar.allCookies
-        logger.debug("Synchronizing \(nativeCookies.count) cookies from native storage back into WebKit")
-        await cookieBridge.setCookies(nativeCookies)
+        let cookiesToDelete = nativeCookieJar.webKitCookiesToDelete
+        logger.debug(
+            """
+            Synchronizing \(nativeCookies.count) cookies from native storage back into WebKit \
+            after deleting \(cookiesToDelete.count) cookie(s)
+            """
+        )
+        await cookieBridge.synchronize(
+            deleting: cookiesToDelete,
+            setting: nativeCookies
+        )
     }
 
     /// Initializes Approov lazily the first time protected traffic is sent.
