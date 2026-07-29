@@ -43,6 +43,15 @@ package final class ApproovWebViewNativeCookieJar {
         }
     }
 
+    /// A consistent native-cookie snapshot and the latest response mutation it
+    /// contains. Completion uses the generation to release only barriers that
+    /// this specific WebKit mirror actually covered.
+    package struct WebKitFlush {
+        package let cookiesToDelete: [HTTPCookie]
+        package let cookiesToSet: [HTTPCookie]
+        fileprivate let responseMutationGeneration: UInt64
+    }
+
     private struct CookieIdentity: Hashable {
         let name: String
         let domain: String
@@ -55,15 +64,22 @@ package final class ApproovWebViewNativeCookieJar {
         }
     }
 
+    private struct ResponseMutationBarrier {
+        var snapshotTicket: UInt64
+        let responseMutationGeneration: UInt64
+        var isAwaitingWebKitFlush: Bool
+    }
+
     package let sessionConfiguration: URLSessionConfiguration
 
     private let storage: HTTPCookieStorage
     private var previousWebKitCookieIdentities: Set<CookieIdentity> = []
     private var nextWebKitSnapshotTicket: UInt64 = 0
     private var lastAppliedWebKitSnapshotTicket: UInt64 = 0
-    private var responseMutationBarriers: [CookieIdentity: UInt64] = [:]
+    private var responseMutationBarriers:
+        [CookieIdentity: ResponseMutationBarrier] = [:]
     private var pendingWebKitDeletions: [CookieIdentity: HTTPCookie] = [:]
-    private var hasUnflushedResponseMutations = false
+    private var nextResponseMutationGeneration: UInt64 = 0
 
     package init(
         sessionConfiguration: URLSessionConfiguration = .ephemeral
@@ -95,7 +111,9 @@ package final class ApproovWebViewNativeCookieJar {
 
     /// Whether a response mutation is still waiting to be mirrored into WebKit.
     package var isAwaitingWebKitFlush: Bool {
-        hasUnflushedResponseMutations
+        responseMutationBarriers.values.contains {
+            $0.isAwaitingWebKitFlush
+        }
     }
 
     /// Reserves ordering for a WebKit snapshot before its asynchronous read.
@@ -104,22 +122,39 @@ package final class ApproovWebViewNativeCookieJar {
         return nextWebKitSnapshotTicket
     }
 
-    /// Records that the bridge finished mirroring response mutations into
-    /// WebKit, so snapshots taken from here on can be trusted for the mutated
-    /// identities.
+    /// Captures the native state and response generation to mirror into WebKit.
+    package func makeWebKitFlush() -> WebKitFlush {
+        WebKitFlush(
+            cookiesToDelete: Array(pendingWebKitDeletions.values),
+            cookiesToSet: storage.cookies ?? [],
+            responseMutationGeneration: nextResponseMutationGeneration
+        )
+    }
+
+    /// Records that the bridge finished applying one captured native state to
+    /// WebKit.
     ///
-    /// Barriers are re-based onto the latest reserved ticket rather than
-    /// cleared: a snapshot whose read was already in flight while the mirror
-    /// was being applied must still be ignored, because it may have observed
-    /// WebKit before the delete/set pair landed. Once a snapshot reserved after
-    /// the mirror arrives, WebKit is authoritative for those identities again,
-    /// so a cookie the page legitimately re-created is honoured instead of
-    /// being suppressed indefinitely.
-    package func completeWebKitFlush() {
-        hasUnflushedResponseMutations = false
+    /// Only barriers whose mutation generation was present in `flush` are
+    /// released. A later response can arrive while this flush is suspended; its
+    /// barrier remains pending until a later flush that actually contains it
+    /// completes.
+    ///
+    /// Covered barriers are re-based onto the latest reserved ticket rather
+    /// than cleared. A snapshot whose read was already in flight while the
+    /// mirror was being applied may still contain the pre-mirror WebKit state.
+    package func completeWebKitFlush(_ flush: WebKitFlush) {
         let rebasedTicket = nextWebKitSnapshotTicket
-        for identity in Array(responseMutationBarriers.keys) {
-            responseMutationBarriers[identity] = rebasedTicket
+        responseMutationBarriers = responseMutationBarriers.mapValues {
+            barrier in
+            let completedGeneration = flush.responseMutationGeneration
+            guard barrier.responseMutationGeneration <= completedGeneration else {
+                return barrier
+            }
+
+            var completedBarrier = barrier
+            completedBarrier.snapshotTicket = rebasedTicket
+            completedBarrier.isAwaitingWebKitFlush = false
+            return completedBarrier
         }
     }
 
@@ -132,7 +167,7 @@ package final class ApproovWebViewNativeCookieJar {
     /// a late WebKit callback from undoing a server deletion or replacement.
     ///
     /// A barrier is released only by a snapshot reserved after
-    /// `completeWebKitFlush()`, so trust never depends on where the caller
+    /// `completeWebKitFlush(_:)`, so trust never depends on where the caller
     /// happens to suspend between storing response cookies and mirroring them.
     /// While a mirror is outstanding every barriered identity is protected
     /// regardless of ticket, because a snapshot reserved after the response can
@@ -149,16 +184,19 @@ package final class ApproovWebViewNativeCookieJar {
         let currentIdentities = Set(cookies.map(CookieIdentity.init))
         let protectedIdentities = Set(
             responseMutationBarriers.compactMap { identity, barrier in
-                hasUnflushedResponseMutations || snapshotTicket <= barrier
+                barrier.isAwaitingWebKitFlush
+                    || snapshotTicket <= barrier.snapshotTicket
                     ? identity
                     : nil
             }
         )
-        let confirmedIdentities = hasUnflushedResponseMutations
-            ? []
-            : responseMutationBarriers.compactMap { identity, barrier in
-                snapshotTicket > barrier ? identity : nil
-            }
+        let confirmedIdentities = responseMutationBarriers.compactMap {
+            identity, barrier in
+            !barrier.isAwaitingWebKitFlush
+                && snapshotTicket > barrier.snapshotTicket
+                ? identity
+                : nil
+        }
 
         for identity in confirmedIdentities {
             responseMutationBarriers.removeValue(forKey: identity)
@@ -216,11 +254,20 @@ package final class ApproovWebViewNativeCookieJar {
             url: url
         )
         var outcome = ResponseCookieOutcome()
+        guard !cookies.isEmpty else {
+            return outcome
+        }
+
+        nextResponseMutationGeneration &+= 1
+        let responseMutationGeneration = nextResponseMutationGeneration
 
         for cookie in cookies {
             let identity = CookieIdentity(cookie)
-            responseMutationBarriers[identity] = nextWebKitSnapshotTicket
-            hasUnflushedResponseMutations = true
+            responseMutationBarriers[identity] = ResponseMutationBarrier(
+                snapshotTicket: nextWebKitSnapshotTicket,
+                responseMutationGeneration: responseMutationGeneration,
+                isAwaitingWebKitFlush: true
+            )
 
             if let expiresDate = cookie.expiresDate, expiresDate <= Date() {
                 let deletionCookie = storedCookie(withIdentity: identity)

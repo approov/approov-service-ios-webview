@@ -6,11 +6,6 @@ The format is based on Keep a Changelog and this package follows Semantic Versio
 Released versions are tagged in git.
 
 ## [0.5.1] - 2026-07-27
-### Added
-  * `ApproovWebViewCoordinator.bridgeInitializationError` reports the failure that stopped the
-    native bridge from initializing. `ApproovWebViewFactory.makeWebView(...)` and
-    `install(on:...)` are not throwing, so without this a host could only discover a dead bridge
-    when the page made its first protected request.
 ### Fixed
   * Concurrent protected WebView requests no longer share their native `HTTPCookieStorage` with
     `URLSession`. The bridge now retains the ephemeral configuration's working cookie store but

@@ -157,7 +157,7 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
         // Once the bridge has mirrored the response cookie into WebKit, a new
         // snapshot that omits it propagates the deletion back to the native jar.
-        jar.completeWebKitFlush()
+        completeWebKitFlush(jar)
         synchronize(jar, fromWebKit: [existingCookie])
         XCTAssertEqual(jar.allCookies.map(\.name), ["existing"])
     }
@@ -212,7 +212,7 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
         // This ordered post-mutation snapshot confirms that WebKit observed
         // the bridge deletion and releases the tombstone.
-        jar.completeWebKitFlush()
+        completeWebKitFlush(jar)
         synchronize(jar, fromWebKit: [])
         XCTAssertTrue(jar.allCookies.isEmpty)
         XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
@@ -250,7 +250,7 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
         // A snapshot still in flight when the mirror completed is also ignored.
         let inFlightTicket = jar.beginWebKitSnapshot()
-        jar.completeWebKitFlush()
+        completeWebKitFlush(jar)
         XCTAssertFalse(jar.isAwaitingWebKitFlush)
         XCTAssertTrue(
             jar.synchronizeFromWebKit(
@@ -282,13 +282,88 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
             ],
             url: apiURL
         )
-        jar.completeWebKitFlush()
+        completeWebKitFlush(jar)
 
         let recreated = makeCookie(name: "session", value: "recreated")
         synchronize(jar, fromWebKit: [recreated])
 
         XCTAssertEqual(jar.allCookies.map(\.value), ["recreated"])
         XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
+    }
+
+    func testEarlierFlushCannotReleaseLaterResponseMutation() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        let firstCookie = makeCookie(name: "first", value: "old")
+        let secondCookie = makeCookie(name: "second", value: "old")
+        synchronize(jar, fromWebKit: [firstCookie, secondCookie])
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "first=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        let firstFlush = jar.makeWebKitFlush()
+
+        // A second response lands while the first response's WebKit mirror is
+        // suspended. Its mutation is not present in firstFlush.
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "second=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+
+        jar.completeWebKitFlush(firstFlush)
+
+        // WebKit still contains the second cookie because its own mirror has
+        // not completed. The earlier flush must not release this barrier.
+        synchronize(jar, fromWebKit: [secondCookie])
+        XCTAssertFalse(jar.allCookies.contains { $0.name == "second" })
+        XCTAssertTrue(
+            jar.webKitCookiesToDelete.contains { $0.name == "second" }
+        )
+        XCTAssertTrue(jar.isAwaitingWebKitFlush)
+
+        completeWebKitFlush(jar)
+        synchronize(jar, fromWebKit: [])
+        XCTAssertFalse(jar.isAwaitingWebKitFlush)
+        XCTAssertTrue(jar.allCookies.isEmpty)
+        XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
+    }
+
+    func testEarlierDeletionFlushCannotReleaseLaterReplacement() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        let oldCookie = makeCookie(name: "session", value: "old")
+        synchronize(jar, fromWebKit: [oldCookie])
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        let deletionFlush = jar.makeWebKitFlush()
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=new; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        let replacementCookie = try XCTUnwrap(jar.allCookies.first)
+
+        // Completing the earlier delete does not release the replacement's
+        // barrier. WebKit can still be empty until the queued replacement lands.
+        jar.completeWebKitFlush(deletionFlush)
+        synchronize(jar, fromWebKit: [])
+        XCTAssertEqual(jar.allCookies.map(\.value), ["new"])
+        XCTAssertTrue(jar.isAwaitingWebKitFlush)
+
+        completeWebKitFlush(jar)
+        synchronize(jar, fromWebKit: [replacementCookie])
+        XCTAssertEqual(jar.allCookies.map(\.value), ["new"])
+        XCTAssertFalse(jar.isAwaitingWebKitFlush)
     }
 
     func testStaleSnapshotCannotOverwriteResponseReplacement() throws {
@@ -534,6 +609,13 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
             )
         )
     }
+
+    private func completeWebKitFlush(
+        _ jar: ApproovWebViewNativeCookieJar
+    ) {
+        let flush = jar.makeWebKitFlush()
+        jar.completeWebKitFlush(flush)
+    }
 }
 
 private actor NativeCookieHarness {
@@ -569,7 +651,8 @@ private actor NativeCookieHarness {
     }
 
     func completeWebKitFlush() {
-        jar.completeWebKitFlush()
+        let flush = jar.makeWebKitFlush()
+        jar.completeWebKitFlush(flush)
     }
 
     func synchronizeFromWebKit(

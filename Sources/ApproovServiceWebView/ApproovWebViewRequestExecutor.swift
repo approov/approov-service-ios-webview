@@ -208,23 +208,22 @@ final actor ApproovWebViewRequestExecutor {
 
     /// Pushes cookies written during the native request back into WebKit.
     ///
-    /// `completeWebKitFlush()` must run once the bridge has applied the ordered
-    /// delete/set pair and must not be skipped, otherwise the mutated
-    /// identities stay barriered and later WebKit edits to them are ignored.
-    /// The `defer` keeps that true even if this task is cancelled.
+    /// `completeWebKitFlush(_:)` must run once the bridge has applied this
+    /// generation's ordered delete/set pair. The generation prevents an older
+    /// request from releasing a newer response's barriers while actor
+    /// re-entrancy allows their mirrors to overlap.
     private func synchronizeCookiesBackIntoWebView() async {
-        let nativeCookies = nativeCookieJar.allCookies
-        let cookiesToDelete = nativeCookieJar.webKitCookiesToDelete
+        let flush = nativeCookieJar.makeWebKitFlush()
         logger.debug(
             """
-            Synchronizing \(nativeCookies.count) cookies from native storage back into WebKit \
-            after deleting \(cookiesToDelete.count) cookie(s)
+            Synchronizing \(flush.cookiesToSet.count) cookies from native storage back into WebKit \
+            after deleting \(flush.cookiesToDelete.count) cookie(s)
             """
         )
-        defer { nativeCookieJar.completeWebKitFlush() }
+        defer { nativeCookieJar.completeWebKitFlush(flush) }
         await cookieBridge.synchronize(
-            deleting: cookiesToDelete,
-            setting: nativeCookies
+            deleting: flush.cookiesToDelete,
+            setting: flush.cookiesToSet
         )
     }
 

@@ -10,14 +10,8 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private let logger: ApproovWebViewLogger
     private weak var webView: WKWebView?
     private var executor: ApproovWebViewRequestExecutor?
+    private var executorInitializationError: Error?
     private var didWarnAboutMissingOriginAllowlist = false
-
-    /// The failure that stopped the native bridge from initializing, if any.
-    ///
-    /// `ApproovWebViewFactory`'s entry points are not throwing, so this is how
-    /// a host detects a bridge that will reject every protected request instead
-    /// of discovering it when the page makes its first call.
-    public private(set) var bridgeInitializationError: Error?
 
     public init(configuration: ApproovWebViewConfiguration) {
         self.configuration = configuration
@@ -52,10 +46,10 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                     store: webView.configuration.websiteDataStore.httpCookieStore
                 )
             )
-            self.bridgeInitializationError = nil
+            self.executorInitializationError = nil
         } catch {
             self.executor = nil
-            self.bridgeInitializationError = error
+            self.executorInitializationError = error
             logger.error(
                 "Failed to initialize the native request executor: \(error.localizedDescription)"
             )
@@ -85,11 +79,11 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         }
 
         guard let executor else {
-            if let bridgeInitializationError {
+            if let executorInitializationError {
                 logger.error(
                     """
                     Rejecting bridge message: the native executor failed to initialize: \
-                    \(bridgeInitializationError.localizedDescription)
+                    \(executorInitializationError.localizedDescription)
                     """
                 )
             } else {
@@ -98,7 +92,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
             replyHandler(
                 nil,
-                bridgeInitializationError?.localizedDescription
+                executorInitializationError?.localizedDescription
                     ?? "The native bridge is not ready yet."
             )
             return
