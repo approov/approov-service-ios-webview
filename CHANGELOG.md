@@ -18,6 +18,18 @@ Released versions are tagged in git.
     preserves newer response cookies while propagating cookies deleted by WebKit. Server-driven
     expiration and deletion are now mirrored into WebKit explicitly, and per-cookie mutation
     barriers prevent late WebKit snapshots from resurrecting deletions or overwriting replacements.
+    A barrier is held until the mirror has actually been applied rather than until the next
+    snapshot ticket, so correctness no longer depends on where the request executor happens to
+    suspend between storing response cookies and mirroring them.
+  * Reinstalling the bridge on an already-attached `WKWebView` no longer rebuilds the request
+    executor. A rebuild discarded the cookie jar along with any deletion still waiting to be
+    mirrored into WebKit, and re-ran lazy Approov initialization.
+
+### Known limitations
+  * Cookie reconciliation state is per request executor, so two protected web views sharing a
+    `WKWebsiteDataStore` (including the process-wide `.default()` store) are not serialized
+    against each other and can observe each other's half-applied WebKit updates. Protect one web
+    view at a time.
 
 ## [0.5] - 2026-06-10
 ### Added

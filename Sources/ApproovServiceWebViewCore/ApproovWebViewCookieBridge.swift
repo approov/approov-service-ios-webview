@@ -3,6 +3,10 @@ import WebKit
 
 /// Package-internal adapter that makes WebKit cookie operations controllable
 /// in the Core test target without linking the binary Approov framework.
+///
+/// The `@available(macOS 10.15, *)` annotations on this file exist only so the
+/// Core module still compiles when the package is built for macOS tooling;
+/// `Package.swift` ships iOS 15 as the only supported platform.
 @available(macOS 10.15, *)
 @MainActor
 package protocol ApproovWebViewCookieStoreAdapter: AnyObject {
@@ -50,8 +54,16 @@ private final class WebKitCookieStoreAdapter:
 /// network requests concurrent.
 ///
 /// Each reconciliation deletes tombstoned cookies before setting the current
-/// native state. Reads wait for all previously invoked mutations so snapshots
-/// cannot observe a half-applied delete/set sequence.
+/// native state. A read waits for every mutation already invoked when the read
+/// began, so it cannot observe a half-applied delete/set sequence from those.
+/// A mutation invoked *after* the read began can still interleave, because the
+/// underlying store read is itself asynchronous; `ApproovWebViewNativeCookieJar`
+/// covers that case with snapshot tickets and its pending-mirror barrier rather
+/// than with a store-wide lock.
+///
+/// - Note: One bridge serializes only its own mutations. Two bridges over the
+///   same `WKHTTPCookieStore` (one per protected web view sharing a
+///   `WKWebsiteDataStore`) do not serialize against each other.
 @available(macOS 10.15, *)
 @MainActor
 package final class ApproovWebViewCookieBridge {

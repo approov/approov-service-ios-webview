@@ -21,6 +21,17 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     /// Attaches the concrete `WKWebView` after construction so the
     /// request-execution pipeline can reuse the WebKit cookie store.
     func attach(webView: WKWebView) {
+        // Reinstallation on an already-attached web view must not rebuild the
+        // executor: a fresh executor means a fresh cookie jar, which discards
+        // any tombstone still waiting to be mirrored into WebKit and re-runs
+        // lazy Approov initialization.
+        if self.webView === webView, executor != nil {
+            logger.debug(
+                "Coordinator is already attached to this web view; keeping the existing executor"
+            )
+            return
+        }
+
         logger.debug(
             """
             Attaching coordinator to web view with handler '\(configuration.bridgeHandlerName)' \
@@ -68,7 +79,17 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         }
 
         guard let executor else {
-            logger.error("Received bridge message before the native executor was attached")
+            if let executorInitializationError {
+                logger.error(
+                    """
+                    Rejecting bridge message: the native executor failed to initialize: \
+                    \(executorInitializationError.localizedDescription)
+                    """
+                )
+            } else {
+                logger.error("Received bridge message before the native executor was attached")
+            }
+
             replyHandler(
                 nil,
                 executorInitializationError?.localizedDescription

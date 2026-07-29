@@ -8,6 +8,9 @@ import XCTest
 final class ApproovWebViewCookieBridgeTests: XCTestCase {
     func testRealWebKitStoreDeletesHttpOnlyCookie() async throws {
         let dataStore = WKWebsiteDataStore.nonPersistent()
+        // Not dead code: the data store owns the cookie store, so it has to
+        // outlive the bridge or the cookies vanish mid-test.
+        // `withExtendedLifetime` has no async overload, hence the defer.
         defer { _ = dataStore }
         let bridge = ApproovWebViewCookieBridge(
             store: dataStore.httpCookieStore
@@ -30,6 +33,7 @@ final class ApproovWebViewCookieBridgeTests: XCTestCase {
 
     func testRealWebKitStoreDeletesBeforeSettingReplacement() async throws {
         let dataStore = WKWebsiteDataStore.nonPersistent()
+        // See above: keeps the owning data store alive for the whole test.
         defer { _ = dataStore }
         let bridge = ApproovWebViewCookieBridge(
             store: dataStore.httpCookieStore

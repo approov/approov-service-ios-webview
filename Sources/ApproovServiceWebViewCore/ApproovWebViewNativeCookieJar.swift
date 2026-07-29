@@ -17,7 +17,41 @@ package enum ApproovWebViewNativeCookieJarError: LocalizedError, Equatable {
 /// deliberately detached from the configuration before it is supplied to
 /// `URLSession`. This gives the request executor exclusive ownership of the jar:
 /// CFNetwork neither reads from nor writes to the same `HTTPCookieStorage`.
+///
+/// - Important: This type is **not** thread-safe and holds mutable
+///   reconciliation state. Every member must be reached from a single
+///   serialized context; in the shipping bridge that context is
+///   `ApproovWebViewRequestExecutor`'s actor isolation. Do not share an
+///   instance across isolation domains.
+///
+/// - Note: One jar tracks one WebKit cookie store *as observed through one
+///   executor*. Two protected web views backed by the same
+///   `WKWebsiteDataStore` (for example the process-wide `.default()` store)
+///   each get their own jar, so their reconciliation state and snapshot
+///   tickets are independent and are not serialized against one another.
+///   Concurrent protected traffic in two such web views can therefore still
+///   observe each other's half-applied WebKit updates. Protecting a single web
+///   view at a time is the supported configuration.
 package final class ApproovWebViewNativeCookieJar {
+    /// What a single response's `Set-Cookie` headers did to the jar.
+    package struct ResponseCookieOutcome: Equatable {
+        package var storedCount = 0
+        package var deletedCount = 0
+
+        package var isEmpty: Bool {
+            storedCount == 0 && deletedCount == 0
+        }
+    }
+
+    /// A consistent native-cookie snapshot and the latest response mutation it
+    /// contains. Completion uses the generation to release only barriers that
+    /// this specific WebKit mirror actually covered.
+    package struct WebKitFlush {
+        package let cookiesToDelete: [HTTPCookie]
+        package let cookiesToSet: [HTTPCookie]
+        fileprivate let responseMutationGeneration: UInt64
+    }
+
     private struct CookieIdentity: Hashable {
         let name: String
         let domain: String
@@ -30,14 +64,22 @@ package final class ApproovWebViewNativeCookieJar {
         }
     }
 
+    private struct ResponseMutationBarrier {
+        var snapshotTicket: UInt64
+        let responseMutationGeneration: UInt64
+        var isAwaitingWebKitFlush: Bool
+    }
+
     package let sessionConfiguration: URLSessionConfiguration
 
     private let storage: HTTPCookieStorage
     private var previousWebKitCookieIdentities: Set<CookieIdentity> = []
     private var nextWebKitSnapshotTicket: UInt64 = 0
     private var lastAppliedWebKitSnapshotTicket: UInt64 = 0
-    private var responseMutationBarriers: [CookieIdentity: UInt64] = [:]
+    private var responseMutationBarriers:
+        [CookieIdentity: ResponseMutationBarrier] = [:]
     private var pendingWebKitDeletions: [CookieIdentity: HTTPCookie] = [:]
+    private var nextResponseMutationGeneration: UInt64 = 0
 
     package init(
         sessionConfiguration: URLSessionConfiguration = .ephemeral
@@ -67,10 +109,53 @@ package final class ApproovWebViewNativeCookieJar {
         Array(pendingWebKitDeletions.values)
     }
 
+    /// Whether a response mutation is still waiting to be mirrored into WebKit.
+    package var isAwaitingWebKitFlush: Bool {
+        responseMutationBarriers.values.contains {
+            $0.isAwaitingWebKitFlush
+        }
+    }
+
     /// Reserves ordering for a WebKit snapshot before its asynchronous read.
     package func beginWebKitSnapshot() -> UInt64 {
         nextWebKitSnapshotTicket += 1
         return nextWebKitSnapshotTicket
+    }
+
+    /// Captures the native state and response generation to mirror into WebKit.
+    package func makeWebKitFlush() -> WebKitFlush {
+        WebKitFlush(
+            cookiesToDelete: Array(pendingWebKitDeletions.values),
+            cookiesToSet: storage.cookies ?? [],
+            responseMutationGeneration: nextResponseMutationGeneration
+        )
+    }
+
+    /// Records that the bridge finished applying one captured native state to
+    /// WebKit.
+    ///
+    /// Only barriers whose mutation generation was present in `flush` are
+    /// released. A later response can arrive while this flush is suspended; its
+    /// barrier remains pending until a later flush that actually contains it
+    /// completes.
+    ///
+    /// Covered barriers are re-based onto the latest reserved ticket rather
+    /// than cleared. A snapshot whose read was already in flight while the
+    /// mirror was being applied may still contain the pre-mirror WebKit state.
+    package func completeWebKitFlush(_ flush: WebKitFlush) {
+        let rebasedTicket = nextWebKitSnapshotTicket
+        responseMutationBarriers = responseMutationBarriers.mapValues {
+            barrier in
+            let completedGeneration = flush.responseMutationGeneration
+            guard barrier.responseMutationGeneration <= completedGeneration else {
+                return barrier
+            }
+
+            var completedBarrier = barrier
+            completedBarrier.snapshotTicket = rebasedTicket
+            completedBarrier.isAwaitingWebKitFlush = false
+            return completedBarrier
+        }
     }
 
     /// Reconciles a WebKit snapshot if no newer asynchronous read has already
@@ -80,8 +165,13 @@ package final class ApproovWebViewNativeCookieJar {
     /// latest snapshot ticket that had already been reserved. Values and
     /// absences from those snapshots are ignored for that identity, preventing
     /// a late WebKit callback from undoing a server deletion or replacement.
-    /// The first later snapshot is read only after the bridge's ordered
-    /// delete/set operation and therefore confirms the response mutation.
+    ///
+    /// A barrier is released only by a snapshot reserved after
+    /// `completeWebKitFlush(_:)`, so trust never depends on where the caller
+    /// happens to suspend between storing response cookies and mirroring them.
+    /// While a mirror is outstanding every barriered identity is protected
+    /// regardless of ticket, because a snapshot reserved after the response can
+    /// still read WebKit before the mirror is applied.
     @discardableResult
     package func synchronizeFromWebKit(
         _ cookies: [HTTPCookie],
@@ -94,12 +184,18 @@ package final class ApproovWebViewNativeCookieJar {
         let currentIdentities = Set(cookies.map(CookieIdentity.init))
         let protectedIdentities = Set(
             responseMutationBarriers.compactMap { identity, barrier in
-                snapshotTicket <= barrier ? identity : nil
+                barrier.isAwaitingWebKitFlush
+                    || snapshotTicket <= barrier.snapshotTicket
+                    ? identity
+                    : nil
             }
         )
         let confirmedIdentities = responseMutationBarriers.compactMap {
             identity, barrier in
-            snapshotTicket > barrier ? identity : nil
+            !barrier.isAwaitingWebKitFlush
+                && snapshotTicket > barrier.snapshotTicket
+                ? identity
+                : nil
         }
 
         for identity in confirmedIdentities {
@@ -145,32 +241,48 @@ package final class ApproovWebViewNativeCookieJar {
     }
 
     /// Explicitly accepts response cookies into the actor-owned jar.
+    ///
+    /// The result distinguishes cookies written from cookies the server
+    /// expired, so callers do not report a logout as a store.
     @discardableResult
     package func storeResponseCookies(
         fromResponseHeaders headers: [AnyHashable: Any],
         url: URL
-    ) -> Int {
+    ) -> ResponseCookieOutcome {
         let cookies = ApproovWebViewResponseCookies.cookies(
             fromResponseHeaders: headers,
             url: url
         )
+        var outcome = ResponseCookieOutcome()
+        guard !cookies.isEmpty else {
+            return outcome
+        }
+
+        nextResponseMutationGeneration &+= 1
+        let responseMutationGeneration = nextResponseMutationGeneration
 
         for cookie in cookies {
             let identity = CookieIdentity(cookie)
-            responseMutationBarriers[identity] = nextWebKitSnapshotTicket
+            responseMutationBarriers[identity] = ResponseMutationBarrier(
+                snapshotTicket: nextWebKitSnapshotTicket,
+                responseMutationGeneration: responseMutationGeneration,
+                isAwaitingWebKitFlush: true
+            )
 
             if let expiresDate = cookie.expiresDate, expiresDate <= Date() {
                 let deletionCookie = storedCookie(withIdentity: identity)
                     ?? cookie
                 deleteCookie(withIdentity: identity)
                 pendingWebKitDeletions[identity] = deletionCookie
+                outcome.deletedCount += 1
             } else {
                 storage.setCookie(cookie)
                 pendingWebKitDeletions.removeValue(forKey: identity)
+                outcome.storedCount += 1
             }
         }
 
-        return cookies.count
+        return outcome
     }
 
     private func deleteCookie(withIdentity identity: CookieIdentity) {

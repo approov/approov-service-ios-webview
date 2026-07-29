@@ -181,37 +181,49 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Stores cookies set by the native response into the isolated cookie jar.
+    ///
+    /// Every mutation recorded here is held behind a barrier until
+    /// `synchronizeCookiesBackIntoWebView()` has mirrored it into WebKit, so a
+    /// concurrent request's snapshot cannot resurrect a server deletion.
     private func storeResponseCookies(from response: HTTPURLResponse) {
         guard let url = response.url else {
             return
         }
 
-        let storedCookieCount = nativeCookieJar.storeResponseCookies(
+        let outcome = nativeCookieJar.storeResponseCookies(
             fromResponseHeaders: response.allHeaderFields,
             url: url
         )
-        guard storedCookieCount > 0 else {
+        guard !outcome.isEmpty else {
             return
         }
 
         logger.debug(
-            "Stored \(storedCookieCount) cookie(s) from native response into the isolated jar"
+            """
+            Applied native response cookies to the isolated jar: \
+            stored \(outcome.storedCount), deleted \(outcome.deletedCount)
+            """
         )
     }
 
     /// Pushes cookies written during the native request back into WebKit.
+    ///
+    /// `completeWebKitFlush(_:)` must run once the bridge has applied this
+    /// generation's ordered delete/set pair. The generation prevents an older
+    /// request from releasing a newer response's barriers while actor
+    /// re-entrancy allows their mirrors to overlap.
     private func synchronizeCookiesBackIntoWebView() async {
-        let nativeCookies = nativeCookieJar.allCookies
-        let cookiesToDelete = nativeCookieJar.webKitCookiesToDelete
+        let flush = nativeCookieJar.makeWebKitFlush()
         logger.debug(
             """
-            Synchronizing \(nativeCookies.count) cookies from native storage back into WebKit \
-            after deleting \(cookiesToDelete.count) cookie(s)
+            Synchronizing \(flush.cookiesToSet.count) cookies from native storage back into WebKit \
+            after deleting \(flush.cookiesToDelete.count) cookie(s)
             """
         )
+        defer { nativeCookieJar.completeWebKitFlush(flush) }
         await cookieBridge.synchronize(
-            deleting: cookiesToDelete,
-            setting: nativeCookies
+            deleting: flush.cookiesToDelete,
+            setting: flush.cookiesToSet
         )
     }
 
