@@ -70,6 +70,63 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         )
     }
 
+    func testPrepareRedirectRebuildsCookieHeaderForDestination() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        synchronize(jar, fromWebKit: [
+            makeCookie(
+                name: "source",
+                value: "secret",
+                domain: "api.example.com"
+            ),
+            makeCookie(
+                name: "destination",
+                value: "allowed",
+                domain: "login.example.net"
+            )
+        ])
+        let destinationURL = URL(
+            string: "https://login.example.net/complete"
+        )!
+        var request = URLRequest(url: destinationURL)
+        request.setValue("source=secret", forHTTPHeaderField: "Cookie")
+
+        jar.prepareRedirect(&request, for: destinationURL)
+
+        XCTAssertFalse(request.httpShouldHandleCookies)
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Cookie"),
+            "destination=allowed"
+        )
+    }
+
+    func testRedirectResponseCookieIsAppliedToNextHop() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        let redirectURL = URL(
+            string: "https://api.example.com/login"
+        )!
+        let destinationURL = URL(
+            string: "https://api.example.com/authenticated"
+        )!
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=redirected; Path=/; HttpOnly"
+            ],
+            url: redirectURL
+        )
+        var proposedRequest = URLRequest(url: destinationURL)
+
+        jar.prepareRedirect(
+            &proposedRequest,
+            for: destinationURL
+        )
+
+        XCTAssertEqual(
+            proposedRequest.value(forHTTPHeaderField: "Cookie"),
+            "session=redirected"
+        )
+    }
+
     func testStoresReplacesAndDeletesResponseCookies() throws {
         let jar = try ApproovWebViewNativeCookieJar()
 
@@ -289,6 +346,27 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
         XCTAssertEqual(jar.allCookies.map(\.value), ["recreated"])
         XCTAssertTrue(jar.webKitCookiesToDelete.isEmpty)
+    }
+
+    func testWebKitDeletionOfNewResponseCookieAfterFlushRemovesNativeCookie() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        synchronize(jar, fromWebKit: [])
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=new; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        XCTAssertEqual(jar.allCookies.map(\.value), ["new"])
+
+        completeWebKitFlush(jar)
+        synchronize(jar, fromWebKit: [])
+
+        XCTAssertTrue(jar.allCookies.isEmpty)
+        var request = URLRequest(url: apiURL)
+        jar.prepare(&request, for: apiURL)
+        XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
     }
 
     func testEarlierFlushCannotReleaseLaterResponseMutation() throws {

@@ -12,7 +12,9 @@ Released versions are tagged in git.
     detaches it from `ApproovURLSession`, disables automatic cookie handling, and manages request
     and response cookies exclusively inside the request executor. This prevents a CFNetwork race
     in `CompactCookieArray::_mungeCookies` that could crash when overlapping requests updated the
-    same cookie jar.
+    same cookie jar. Redirects are followed one protected hop at a time so cookies set by an
+    intermediate response are available to the next hop without re-enabling shared automatic
+    cookie handling.
   * WebKit cookies are synchronized before the protected request's `Cookie` header is constructed,
     so the request no longer uses the previous native snapshot. Snapshot reconciliation also
     preserves newer response cookies while propagating cookies deleted by WebKit. Server-driven
@@ -20,7 +22,9 @@ Released versions are tagged in git.
     barriers prevent late WebKit snapshots from resurrecting deletions or overwriting replacements.
     A barrier is held until the mirror has actually been applied rather than until the next
     snapshot ticket, so correctness no longer depends on where the request executor happens to
-    suspend between storing response cookies and mirroring them.
+    suspend between storing response cookies and mirroring them. A post-flush WebKit snapshot that
+    omits a newly introduced response cookie now removes it from the native jar even when WebKit
+    deleted or rejected it before it was ever observed in a snapshot.
   * Reinstalling the bridge on an already-attached `WKWebView` no longer rebuilds the request
     executor. A rebuild discarded the cookie jar along with any deletion still waiting to be
     mirrored into WebKit, and re-ran lazy Approov initialization.

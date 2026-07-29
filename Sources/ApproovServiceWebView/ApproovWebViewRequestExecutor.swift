@@ -11,9 +11,12 @@ import Foundation
 /// - execution through `ApproovURLSession`
 /// - mapping the result back into either JS response mode or navigation mode
 final actor ApproovWebViewRequestExecutor {
+    private static let maximumRedirectCount = 20
+
     private let configuration: ApproovWebViewConfiguration
     private let cookieBridge: ApproovWebViewCookieBridge
     private let nativeCookieJar: ApproovWebViewNativeCookieJar
+    private let redirectDelegate: ApproovWebViewRedirectDelegate
     private let urlSession: ApproovURLSession
     private let logger: ApproovWebViewLogger
     private let scopeID = UUID().uuidString
@@ -28,9 +31,13 @@ final actor ApproovWebViewRequestExecutor {
         self.logger = ApproovWebViewLogger(configuration: configuration)
 
         let nativeCookieJar = try ApproovWebViewNativeCookieJar()
+        let redirectDelegate = ApproovWebViewRedirectDelegate()
         self.nativeCookieJar = nativeCookieJar
+        self.redirectDelegate = redirectDelegate
         self.urlSession = ApproovURLSession(
-            configuration: nativeCookieJar.sessionConfiguration
+            configuration: nativeCookieJar.sessionConfiguration,
+            delegate: redirectDelegate,
+            delegateQueue: nil
         )
         logger.debug("Created native request executor with scope \(scopeID)")
     }
@@ -64,16 +71,19 @@ final actor ApproovWebViewRequestExecutor {
         nativeCookieJar.prepare(&request, for: requestContext.requestURL)
         ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &request)
 
-        let (data, response) = try await performPinnedRequest(request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ApproovWebViewBridgeError.nonHTTPResponse
+        let data: Data
+        let httpResponse: HTTPURLResponse
+        do {
+            (data, httpResponse) = try await performPinnedRequestFollowingRedirects(
+                request
+            )
+        } catch {
+            // A successful redirect response may already have mutated the jar.
+            // Mirror it even if a later hop fails, matching browser cookie
+            // persistence across a partially completed redirect chain.
+            await synchronizeCookiesBackIntoWebView()
+            throw error
         }
-
-        // Capture `Set-Cookie` from the response explicitly rather than relying on
-        // `URLSession`'s automatic cookie acceptance. The bridge owns cookie
-        // synchronization end to end, so harvesting here keeps behavior identical
-        // regardless of how `ApproovURLSession` configures its underlying session.
-        storeResponseCookies(from: httpResponse)
 
         await synchronizeCookiesBackIntoWebView()
         logger.debug(
@@ -107,6 +117,56 @@ final actor ApproovWebViewRequestExecutor {
                     data: data
                 )
             )
+        }
+    }
+
+    /// Executes one protected task per HTTP hop so redirect response cookies
+    /// are accepted before the next request is constructed.
+    ///
+    /// URLSession still proposes the redirected request, preserving its normal
+    /// method, body, and header transformations. The redirect delegate declines
+    /// the automatic follow and returns that proposal here, where the stale
+    /// Cookie header is rebuilt for the destination URL.
+    private func performPinnedRequestFollowingRedirects(
+        _ request: URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        var currentRequest = request
+        var redirectCount = 0
+
+        while true {
+            let (data, response, proposedRedirect) =
+                try await performPinnedRequest(currentRequest)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ApproovWebViewBridgeError.nonHTTPResponse
+            }
+
+            storeResponseCookies(from: httpResponse)
+
+            guard var redirectRequest = proposedRedirect else {
+                return (data, httpResponse)
+            }
+
+            guard redirectCount < Self.maximumRedirectCount else {
+                throw URLError(.httpTooManyRedirects)
+            }
+            redirectCount += 1
+
+            guard let redirectURL = redirectRequest.url,
+                  Self.isHTTPScheme(redirectURL) else {
+                throw ApproovWebViewBridgeError.unsupportedScheme(
+                    redirectRequest.url?.absoluteString ?? "<missing>"
+                )
+            }
+
+            nativeCookieJar.prepareRedirect(
+                &redirectRequest,
+                for: redirectURL
+            )
+            ApproovWebViewServiceMutator.setWebViewScope(
+                scopeID,
+                on: &redirectRequest
+            )
+            currentRequest = redirectRequest
         }
     }
 
@@ -270,11 +330,27 @@ final actor ApproovWebViewRequestExecutor {
 
     /// Uses the completion-handler `dataTask(...)` path because the async
     /// convenience APIs are not protected by `ApproovURLSession`.
-    private func performPinnedRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    private func performPinnedRequest(
+        _ request: URLRequest
+    ) async throws -> (Data, URLResponse, URLRequest?) {
         logger.debug("Executing protected request via ApproovURLSession: \(request.logDescription)")
+        let redirectDelegate = redirectDelegate
         return try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
+            (
+                continuation:
+                    CheckedContinuation<
+                        (Data, URLResponse, URLRequest?),
+                        Error
+                    >
+            ) in
+            let taskReference = ApproovWebViewTaskReference()
             let task = urlSession.dataTask(with: request) { data, response, error in
+                let proposedRedirect = taskReference.taskIdentifier.flatMap {
+                    redirectDelegate.takeProposedRequest(
+                        for: $0
+                    )
+                }
+
                 if let error {
                     continuation.resume(throwing: error)
                     return
@@ -285,9 +361,12 @@ final actor ApproovWebViewRequestExecutor {
                     return
                 }
 
-                continuation.resume(returning: (data, response))
+                continuation.resume(
+                    returning: (data, response, proposedRedirect)
+                )
             }
 
+            taskReference.taskIdentifier = task.taskIdentifier
             task.resume()
         }
     }
@@ -345,5 +424,26 @@ final actor ApproovWebViewRequestExecutor {
         }
 
         return "\(scheme)://\(host)"
+    }
+}
+
+/// Shares a task identifier with its completion handler without capturing a
+/// mutable local variable across concurrency domains.
+private final class ApproovWebViewTaskReference:
+    @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedTaskIdentifier: Int?
+
+    var taskIdentifier: Int? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedTaskIdentifier
+        }
+        set {
+            lock.lock()
+            storedTaskIdentifier = newValue
+            lock.unlock()
+        }
     }
 }
