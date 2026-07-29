@@ -21,8 +21,8 @@ package final class ApproovWebViewRedirectDelegate:
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         lock.lock()
+        defer { lock.unlock() }
         proposedRequests[task.taskIdentifier] = request
-        lock.unlock()
 
         completionHandler(nil)
     }
