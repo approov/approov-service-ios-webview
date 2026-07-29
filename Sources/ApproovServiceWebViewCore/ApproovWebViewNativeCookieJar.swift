@@ -117,8 +117,9 @@ package final class ApproovWebViewNativeCookieJar {
     /// being suppressed indefinitely.
     package func completeWebKitFlush() {
         hasUnflushedResponseMutations = false
-        for identity in responseMutationBarriers.keys {
-            responseMutationBarriers[identity] = nextWebKitSnapshotTicket
+        let rebasedTicket = nextWebKitSnapshotTicket
+        for identity in Array(responseMutationBarriers.keys) {
+            responseMutationBarriers[identity] = rebasedTicket
         }
     }
 
