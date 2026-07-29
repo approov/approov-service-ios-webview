@@ -198,6 +198,9 @@ package final class ApproovWebViewNativeCookieJar {
                 : nil
         }
 
+        let confirmedMissingIdentities = Set(confirmedIdentities)
+            .subtracting(currentIdentities)
+
         for identity in confirmedIdentities {
             responseMutationBarriers.removeValue(forKey: identity)
             pendingWebKitDeletions.removeValue(forKey: identity)
@@ -206,6 +209,7 @@ package final class ApproovWebViewNativeCookieJar {
         let deletedIdentities = previousWebKitCookieIdentities
             .subtracting(currentIdentities)
             .subtracting(protectedIdentities)
+            .union(confirmedMissingIdentities)
 
         if !deletedIdentities.isEmpty {
             for cookie in storage.cookies ?? []
@@ -238,6 +242,20 @@ package final class ApproovWebViewNativeCookieJar {
         for (headerName, headerValue) in HTTPCookie.requestHeaderFields(with: cookies) {
             request.setValue(headerValue, forHTTPHeaderField: headerName)
         }
+    }
+
+    /// Rebuilds the Cookie header for a URLSession-proposed redirect request.
+    ///
+    /// Foundation may copy the manually supplied header from the preceding
+    /// request. Always discard that value and select cookies for the redirect
+    /// destination so a cross-origin redirect cannot receive cookies scoped to
+    /// the original host.
+    package func prepareRedirect(
+        _ request: inout URLRequest,
+        for url: URL
+    ) {
+        request.setValue(nil, forHTTPHeaderField: "Cookie")
+        prepare(&request, for: url)
     }
 
     /// Explicitly accepts response cookies into the actor-owned jar.
