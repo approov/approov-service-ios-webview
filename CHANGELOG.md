@@ -24,10 +24,20 @@ Released versions are tagged in git.
     snapshot ticket, so correctness no longer depends on where the request executor happens to
     suspend between storing response cookies and mirroring them. A post-flush WebKit snapshot that
     omits a newly introduced response cookie now removes it from the native jar even when WebKit
-    deleted or rejected it before it was ever observed in a snapshot.
+    deleted or rejected it before it was ever observed in a snapshot. WebKit snapshots are request
+    input only and are no longer replayed wholesale after a native response; each flush mirrors only
+    server response-cookie deltas, preventing an in-flight request from resurrecting a page-side
+    deletion or overwriting a newer page-side replacement. Each delta is claimed by one flush, and
+    flush completion acknowledges only the exact cookie identity generations it applied, so an
+    overlapping empty or older flush cannot release a different response's reconciliation barrier.
   * Reinstalling the bridge on an already-attached `WKWebView` no longer rebuilds the request
     executor. A rebuild discarded the cookie jar along with any deletion still waiting to be
     mirrored into WebKit, and re-ran lazy Approov initialization.
+  * Protected-endpoint JSON embedded in the bridge script now uses a deterministic key order.
+    Reinstalling the same configuration could otherwise compare unequal generated scripts and
+    trigger the factory's unsupported-reconfiguration assertion in debug builds.
+  * Redirect handling no longer invokes URLSession's completion callback while holding its
+    redirect-state lock, preventing a synchronous callback from deadlocking on re-entry.
 
 ### Known limitations
   * Cookie reconciliation state is per request executor, so two protected web views sharing a

@@ -53,8 +53,8 @@ private final class WebKitCookieStoreAdapter:
 /// Serializes mutations of WebKit's cookie store while leaving protected
 /// network requests concurrent.
 ///
-/// Each reconciliation deletes tombstoned cookies before setting the current
-/// native state. A read waits for every mutation already invoked when the read
+/// Each reconciliation deletes response tombstones before setting response
+/// cookie deltas. A read waits for every mutation already invoked when the read
 /// began, so it cannot observe a half-applied delete/set sequence from those.
 /// A mutation invoked *after* the read began can still interleave, because the
 /// underlying store read is itself asynchronous; `ApproovWebViewNativeCookieJar`

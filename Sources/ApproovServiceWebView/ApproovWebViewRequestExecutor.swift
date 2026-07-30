@@ -266,12 +266,16 @@ final actor ApproovWebViewRequestExecutor {
         )
     }
 
-    /// Pushes cookies written during the native request back into WebKit.
+    /// Pushes only cookies written by native responses back into WebKit.
+    ///
+    /// Cookies imported from the pre-request WebKit snapshot are deliberately
+    /// not included. Replaying them here could overwrite a page-side deletion
+    /// or replacement made while the network request was suspended.
     ///
     /// `completeWebKitFlush(_:)` must run once the bridge has applied this
-    /// generation's ordered delete/set pair. The generation prevents an older
-    /// request from releasing a newer response's barriers while actor
-    /// re-entrancy allows their mirrors to overlap.
+    /// captured ordered delete/set pair. Completion acknowledges only the exact
+    /// identity generations in that flush, so overlapping empty or older
+    /// mirrors cannot release a newer response's barriers.
     private func synchronizeCookiesBackIntoWebView() async {
         let flush = nativeCookieJar.makeWebKitFlush()
         logger.debug(

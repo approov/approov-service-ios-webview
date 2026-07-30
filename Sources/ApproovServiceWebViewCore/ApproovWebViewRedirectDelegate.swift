@@ -21,9 +21,11 @@ package final class ApproovWebViewRedirectDelegate:
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         lock.lock()
-        defer { lock.unlock() }
         proposedRequests[task.taskIdentifier] = request
+        lock.unlock()
 
+        // URLSession owns this callback and may perform synchronous work in
+        // response. Never invoke external code while holding our state lock.
         completionHandler(nil)
     }
 

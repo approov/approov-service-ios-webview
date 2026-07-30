@@ -166,6 +166,96 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         XCTAssertTrue(jar.allCookies.isEmpty)
     }
 
+    func testFlushDoesNotReplayCookiesImportedFromWebKit() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        synchronize(jar, fromWebKit: [
+            makeCookie(name: "session", value: "authenticated"),
+            makeCookie(name: "preference", value: "compact")
+        ])
+
+        let flush = jar.makeWebKitFlush()
+
+        XCTAssertTrue(flush.cookiesToDelete.isEmpty)
+        XCTAssertTrue(flush.cookiesToSet.isEmpty)
+    }
+
+    func testFlushContainsOnlyPendingResponseCookieDeltas() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        synchronize(jar, fromWebKit: [
+            makeCookie(name: "session", value: "old"),
+            makeCookie(name: "preference", value: "compact")
+        ])
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=new; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+
+        let flush = jar.makeWebKitFlush()
+
+        XCTAssertTrue(flush.cookiesToDelete.isEmpty)
+        XCTAssertEqual(flush.cookiesToSet.map(\.name), ["session"])
+        XCTAssertEqual(flush.cookiesToSet.map(\.value), ["new"])
+
+        jar.completeWebKitFlush(flush)
+        let nextFlush = jar.makeWebKitFlush()
+        XCTAssertTrue(nextFlush.cookiesToDelete.isEmpty)
+        XCTAssertTrue(nextFlush.cookiesToSet.isEmpty)
+    }
+
+    func testResponseDeltaIsClaimedByOnlyOneOverlappingFlush() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=new; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+
+        let firstFlush = jar.makeWebKitFlush()
+        let overlappingFlush = jar.makeWebKitFlush()
+
+        XCTAssertEqual(firstFlush.cookiesToSet.map(\.value), ["new"])
+        XCTAssertTrue(overlappingFlush.cookiesToDelete.isEmpty)
+        XCTAssertTrue(overlappingFlush.cookiesToSet.isEmpty)
+
+        // Completing an overlapping empty flush first must not acknowledge the
+        // response mutation claimed by firstFlush.
+        jar.completeWebKitFlush(overlappingFlush)
+        XCTAssertTrue(jar.isAwaitingWebKitFlush)
+
+        jar.completeWebKitFlush(firstFlush)
+        XCTAssertFalse(jar.isAwaitingWebKitFlush)
+    }
+
+    func testLaterResponseDeltaSurvivesEarlierFlushCompletion() throws {
+        let jar = try ApproovWebViewNativeCookieJar()
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=first; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        let firstFlush = jar.makeWebKitFlush()
+
+        jar.storeResponseCookies(
+            fromResponseHeaders: [
+                "Set-Cookie": "session=second; Path=/; HttpOnly"
+            ],
+            url: apiURL
+        )
+        let secondFlush = jar.makeWebKitFlush()
+        jar.completeWebKitFlush(firstFlush)
+
+        XCTAssertEqual(firstFlush.cookiesToSet.map(\.value), ["first"])
+        XCTAssertEqual(secondFlush.cookiesToSet.map(\.value), ["second"])
+        XCTAssertTrue(jar.isAwaitingWebKitFlush)
+
+        jar.completeWebKitFlush(secondFlush)
+        XCTAssertFalse(jar.isAwaitingWebKitFlush)
+    }
+
     func testStaleWebKitSnapshotPreservesNewerResponseCookie() throws {
         let jar = try ApproovWebViewNativeCookieJar()
         let existingCookie = makeCookie(name: "existing", value: "one")
@@ -240,6 +330,12 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         )
         XCTAssertEqual(deletionCookie.name, "session")
         XCTAssertEqual(deletionCookie.value, "authenticated")
+
+        let flush = jar.makeWebKitFlush()
+        XCTAssertEqual(flush.cookiesToDelete.map(\.name), ["session"])
+        XCTAssertTrue(flush.cookiesToSet.isEmpty)
+        jar.completeWebKitFlush(flush)
+        XCTAssertTrue(jar.makeWebKitFlush().cookiesToDelete.isEmpty)
     }
 
     func testSnapshotStartedBeforeServerDeletionCannotResurrectCookie() throws {

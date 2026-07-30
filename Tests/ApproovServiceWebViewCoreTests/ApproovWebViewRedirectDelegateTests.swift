@@ -97,4 +97,40 @@ final class ApproovWebViewRedirectDelegateTests: XCTestCase {
             firstURL
         )
     }
+
+    func testCompletionHandlerCanSynchronouslyConsumeProposedRequest() throws {
+        let delegate = ApproovWebViewRedirectDelegate()
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let originalURL = try XCTUnwrap(
+            URL(string: "https://api.example.com/start")
+        )
+        let destinationURL = try XCTUnwrap(
+            URL(string: "https://api.example.com/complete")
+        )
+        let task = session.dataTask(with: originalURL)
+        let response = try XCTUnwrap(
+            HTTPURLResponse(
+                url: originalURL,
+                statusCode: 302,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Location": destinationURL.absoluteString]
+            )
+        )
+        var retainedRequest: URLRequest?
+
+        delegate.urlSession(
+            session,
+            task: task,
+            willPerformHTTPRedirection: response,
+            newRequest: URLRequest(url: destinationURL)
+        ) { automaticFollow in
+            XCTAssertNil(automaticFollow)
+            retainedRequest = delegate.takeProposedRequest(
+                for: task.taskIdentifier
+            )
+        }
+
+        XCTAssertEqual(retainedRequest?.url, destinationURL)
+    }
 }

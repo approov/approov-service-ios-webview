@@ -80,6 +80,12 @@ Protected requests follow this path:
 
 Unmatched requests continue through WebKit unchanged.
 
+> [!IMPORTANT]
+> Use only one Approov-protected `WKWebView` at a time for each
+> `WKWebsiteDataStore`. Cookie reconciliation is owned by one request executor;
+> two protected web views sharing a data store, including `.default()`, are not
+> serialized against each other and are currently unsupported.
+
 ## Configuration
 
 `ApproovWebViewConfiguration` is the main contract between the host app and the package.

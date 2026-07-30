@@ -52,6 +52,75 @@ final class ApproovWebViewCookieBridgeTests: XCTestCase {
         XCTAssertEqual(cookies.first?.value, "new")
     }
 
+    func testUnchangedNativeSnapshotDoesNotResurrectRealWebKitDeletion() async throws {
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        defer { _ = dataStore }
+        let bridge = ApproovWebViewCookieBridge(
+            store: dataStore.httpCookieStore
+        )
+        let jar = try ApproovWebViewNativeCookieJar()
+        let original = makeCookie(
+            name: "session",
+            value: "authenticated"
+        )
+        await bridge.synchronize(deleting: [], setting: [original])
+        let snapshotTicket = jar.beginWebKitSnapshot()
+        let snapshot = await bridge.allCookies()
+        XCTAssertTrue(
+            jar.synchronizeFromWebKit(
+                snapshot,
+                snapshotTicket: snapshotTicket
+            )
+        )
+
+        // Models WebKit deleting the cookie while a native request that
+        // produces no Set-Cookie response is suspended.
+        await bridge.synchronize(deleting: [original], setting: [])
+        let flush = jar.makeWebKitFlush()
+        await bridge.synchronize(
+            deleting: flush.cookiesToDelete,
+            setting: flush.cookiesToSet
+        )
+        jar.completeWebKitFlush(flush)
+
+        let cookies = await bridge.allCookies()
+        XCTAssertTrue(cookies.isEmpty)
+    }
+
+    func testUnchangedNativeSnapshotDoesNotOverwriteNewerWebKitValue() async throws {
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        defer { _ = dataStore }
+        let bridge = ApproovWebViewCookieBridge(
+            store: dataStore.httpCookieStore
+        )
+        let jar = try ApproovWebViewNativeCookieJar()
+        let original = makeCookie(name: "session", value: "old")
+        let replacement = makeCookie(name: "session", value: "new")
+        await bridge.synchronize(deleting: [], setting: [original])
+        let snapshotTicket = jar.beginWebKitSnapshot()
+        let snapshot = await bridge.allCookies()
+        XCTAssertTrue(
+            jar.synchronizeFromWebKit(
+                snapshot,
+                snapshotTicket: snapshotTicket
+            )
+        )
+
+        // Models WebKit replacing the cookie while a native request that
+        // produces no Set-Cookie response is suspended.
+        await bridge.synchronize(deleting: [], setting: [replacement])
+        let flush = jar.makeWebKitFlush()
+        await bridge.synchronize(
+            deleting: flush.cookiesToDelete,
+            setting: flush.cookiesToSet
+        )
+        jar.completeWebKitFlush(flush)
+
+        let cookies = await bridge.allCookies()
+        XCTAssertEqual(cookies.count, 1)
+        XCTAssertEqual(cookies.first?.value, "new")
+    }
+
     func testReadsWaitForOrderedDeleteThenSetMutation() async throws {
         let oldCookie = makeCookie(name: "session", value: "old")
         let replacement = makeCookie(name: "session", value: "new")

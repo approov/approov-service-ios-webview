@@ -43,16 +43,18 @@ package final class ApproovWebViewNativeCookieJar {
         }
     }
 
-    /// A consistent native-cookie snapshot and the latest response mutation it
-    /// contains. Completion uses the generation to release only barriers that
-    /// this specific WebKit mirror actually covered.
+    /// The response-cookie mutations captured for one WebKit mirror. Cookies
+    /// imported from WebKit are deliberately excluded: replaying the whole
+    /// native jar could overwrite a newer WebKit change made while a request
+    /// was in flight.
     package struct WebKitFlush {
         package let cookiesToDelete: [HTTPCookie]
         package let cookiesToSet: [HTTPCookie]
-        fileprivate let responseMutationGeneration: UInt64
+        fileprivate let responseMutationGenerations:
+            [CookieIdentity: UInt64]
     }
 
-    private struct CookieIdentity: Hashable {
+    fileprivate struct CookieIdentity: Hashable {
         let name: String
         let domain: String
         let path: String
@@ -78,6 +80,7 @@ package final class ApproovWebViewNativeCookieJar {
     private var lastAppliedWebKitSnapshotTicket: UInt64 = 0
     private var responseMutationBarriers:
         [CookieIdentity: ResponseMutationBarrier] = [:]
+    private var pendingWebKitSets: [CookieIdentity: HTTPCookie] = [:]
     private var pendingWebKitDeletions: [CookieIdentity: HTTPCookie] = [:]
     private var nextResponseMutationGeneration: UInt64 = 0
 
@@ -122,39 +125,59 @@ package final class ApproovWebViewNativeCookieJar {
         return nextWebKitSnapshotTicket
     }
 
-    /// Captures the native state and response generation to mirror into WebKit.
+    /// Captures only server-response mutations waiting to be mirrored.
+    ///
+    /// The working jar also contains cookies imported from WebKit before native
+    /// requests. Those cookies are request input, not native output, and must
+    /// never be replayed into WebKit as part of an unrelated response.
     package func makeWebKitFlush() -> WebKitFlush {
-        WebKitFlush(
+        let capturedIdentities = Set(pendingWebKitDeletions.keys)
+            .union(pendingWebKitSets.keys)
+        let flush = WebKitFlush(
             cookiesToDelete: Array(pendingWebKitDeletions.values),
-            cookiesToSet: storage.cookies ?? [],
-            responseMutationGeneration: nextResponseMutationGeneration
+            cookiesToSet: Array(pendingWebKitSets.values),
+            responseMutationGenerations: Dictionary(
+                uniqueKeysWithValues: capturedIdentities.compactMap {
+                    identity in
+                    responseMutationBarriers[identity].map {
+                        (
+                            identity,
+                            $0.responseMutationGeneration
+                        )
+                    }
+                }
+            )
         )
+        // Claim each delta exactly once. A concurrent executor completion must
+        // not queue the same response write again after the first mirror.
+        pendingWebKitSets.removeAll(keepingCapacity: true)
+        pendingWebKitDeletions.removeAll(keepingCapacity: true)
+        return flush
     }
 
     /// Records that the bridge finished applying one captured native state to
     /// WebKit.
     ///
-    /// Only barriers whose mutation generation was present in `flush` are
-    /// released. A later response can arrive while this flush is suspended; its
-    /// barrier remains pending until a later flush that actually contains it
-    /// completes.
+    /// Only the exact identity generations captured in `flush` are released.
+    /// An overlapping empty flush therefore releases nothing, and a later
+    /// response for the same identity remains pending even if an earlier flush
+    /// completes afterward.
     ///
     /// Covered barriers are re-based onto the latest reserved ticket rather
     /// than cleared. A snapshot whose read was already in flight while the
     /// mirror was being applied may still contain the pre-mirror WebKit state.
     package func completeWebKitFlush(_ flush: WebKitFlush) {
         let rebasedTicket = nextWebKitSnapshotTicket
-        responseMutationBarriers = responseMutationBarriers.mapValues {
-            barrier in
-            let completedGeneration = flush.responseMutationGeneration
-            guard barrier.responseMutationGeneration <= completedGeneration else {
-                return barrier
+        for (identity, completedGeneration) in
+            flush.responseMutationGenerations {
+            guard var barrier = responseMutationBarriers[identity],
+                  barrier.responseMutationGeneration == completedGeneration else {
+                continue
             }
 
-            var completedBarrier = barrier
-            completedBarrier.snapshotTicket = rebasedTicket
-            completedBarrier.isAwaitingWebKitFlush = false
-            return completedBarrier
+            barrier.snapshotTicket = rebasedTicket
+            barrier.isAwaitingWebKitFlush = false
+            responseMutationBarriers[identity] = barrier
         }
     }
 
@@ -203,6 +226,7 @@ package final class ApproovWebViewNativeCookieJar {
 
         for identity in confirmedIdentities {
             responseMutationBarriers.removeValue(forKey: identity)
+            pendingWebKitSets.removeValue(forKey: identity)
             pendingWebKitDeletions.removeValue(forKey: identity)
         }
 
@@ -291,11 +315,13 @@ package final class ApproovWebViewNativeCookieJar {
                 let deletionCookie = storedCookie(withIdentity: identity)
                     ?? cookie
                 deleteCookie(withIdentity: identity)
+                pendingWebKitSets.removeValue(forKey: identity)
                 pendingWebKitDeletions[identity] = deletionCookie
                 outcome.deletedCount += 1
             } else {
                 storage.setCookie(cookie)
                 pendingWebKitDeletions.removeValue(forKey: identity)
+                pendingWebKitSets[identity] = cookie
                 outcome.storedCount += 1
             }
         }
