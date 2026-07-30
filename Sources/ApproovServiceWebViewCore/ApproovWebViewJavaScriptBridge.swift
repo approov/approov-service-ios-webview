@@ -30,6 +30,11 @@ package enum ApproovWebViewJavaScriptBridge {
         _ protectedEndpoints: [ApproovWebViewProtectedEndpoint]
     ) -> String {
         let encoder = JSONEncoder()
+        // The generated source is also the installation identity used by
+        // ApproovWebViewFactory. JSON object key order is not significant and
+        // JSONEncoder does not otherwise promise one, so sort keys to ensure
+        // identical configurations always produce identical source.
+        encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(protectedEndpoints),
               let json = String(data: data, encoding: .utf8) else {
             return "[]"

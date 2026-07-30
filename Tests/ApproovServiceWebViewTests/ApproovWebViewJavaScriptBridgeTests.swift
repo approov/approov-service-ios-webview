@@ -13,9 +13,11 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
             protectedEndpoints: [protectedEndpoint],
             xhrBridgeEnabled: true
         )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
         let expectedEndpointJSON = try XCTUnwrap(
             String(
-                data: JSONEncoder().encode([protectedEndpoint]),
+                data: encoder.encode([protectedEndpoint]),
                 encoding: .utf8
             )
         )
@@ -24,6 +26,32 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
         XCTAssertFalse(source.contains("__APPROOV_PROTECTED_ENDPOINTS__"))
         XCTAssertTrue(source.contains("nativeBridge"))
         XCTAssertTrue(source.contains(expectedEndpointJSON))
+    }
+
+    func testScriptSourceIsStableForIdenticalConfiguration() {
+        let protectedEndpoints = [
+            ApproovWebViewProtectedEndpoint(
+                host: "api.example.com",
+                pathPrefix: "/v1/private",
+                excludedPathPrefixes: ["/v1/private/public-assets"]
+            )
+        ]
+        let expectedSource = ApproovWebViewJavaScriptBridge.scriptSource(
+            handlerName: "nativeBridge",
+            protectedEndpoints: protectedEndpoints,
+            xhrBridgeEnabled: true
+        )
+
+        for _ in 0..<100 {
+            XCTAssertEqual(
+                ApproovWebViewJavaScriptBridge.scriptSource(
+                    handlerName: "nativeBridge",
+                    protectedEndpoints: protectedEndpoints,
+                    xhrBridgeEnabled: true
+                ),
+                expectedSource
+            )
+        }
     }
 
     func testScriptSourceKeepsExpectedFeaturesEnabled() {

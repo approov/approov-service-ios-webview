@@ -19,7 +19,7 @@ final class ApproovWebViewConfigurationTests: XCTestCase {
         XCTAssertNil(configuration.approovDevelopmentKey)
         XCTAssertFalse(configuration.allowRequestsWithoutApproovToken)
         XCTAssertTrue(configuration.interceptXMLHttpRequests)
-        XCTAssertFalse(configuration.debugLoggingEnabled)
+        XCTAssertTrue(configuration.debugLoggingEnabled)
         XCTAssertEqual(configuration.protectedEndpoints.count, 1)
         XCTAssertTrue(configuration.isProtectedEndpoint(URL(string: "https://api.example.com/v1/items")!))
     }

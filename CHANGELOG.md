@@ -5,6 +5,46 @@ All notable changes to this package are documented in this file.
 The format is based on Keep a Changelog and this package follows Semantic Versioning.
 Released versions are tagged in git.
 
+## [0.5.1] - 2026-07-27
+### Fixed
+  * Concurrent protected WebView requests no longer share their native `HTTPCookieStorage` with
+    `URLSession`. The bridge now retains the ephemeral configuration's working cookie store but
+    detaches it from `ApproovURLSession`, disables automatic cookie handling, and manages request
+    and response cookies exclusively inside the request executor. This prevents a CFNetwork race
+    in `CompactCookieArray::_mungeCookies` that could crash when overlapping requests updated the
+    same cookie jar. Redirects are followed one protected hop at a time so cookies set by an
+    intermediate response are available to the next hop without re-enabling shared automatic
+    cookie handling.
+  * WebKit cookies are synchronized before the protected request's `Cookie` header is constructed,
+    so the request no longer uses the previous native snapshot. Snapshot reconciliation also
+    preserves newer response cookies while propagating cookies deleted by WebKit. Server-driven
+    expiration and deletion are now mirrored into WebKit explicitly, and per-cookie mutation
+    barriers prevent late WebKit snapshots from resurrecting deletions or overwriting replacements.
+    A barrier is held until the mirror has actually been applied rather than until the next
+    snapshot ticket, so correctness no longer depends on where the request executor happens to
+    suspend between storing response cookies and mirroring them. A post-flush WebKit snapshot that
+    omits a newly introduced response cookie now removes it from the native jar even when WebKit
+    deleted or rejected it before it was ever observed in a snapshot. WebKit snapshots are request
+    input only and are no longer replayed wholesale after a native response; each flush mirrors only
+    server response-cookie deltas, preventing an in-flight request from resurrecting a page-side
+    deletion or overwriting a newer page-side replacement. Each delta is claimed by one flush, and
+    flush completion acknowledges only the exact cookie identity generations it applied, so an
+    overlapping empty or older flush cannot release a different response's reconciliation barrier.
+  * Reinstalling the bridge on an already-attached `WKWebView` no longer rebuilds the request
+    executor. A rebuild discarded the cookie jar along with any deletion still waiting to be
+    mirrored into WebKit, and re-ran lazy Approov initialization.
+  * Protected-endpoint JSON embedded in the bridge script now uses a deterministic key order.
+    Reinstalling the same configuration could otherwise compare unequal generated scripts and
+    trigger the factory's unsupported-reconfiguration assertion in debug builds.
+  * Redirect handling no longer invokes URLSession's completion callback while holding its
+    redirect-state lock, preventing a synchronous callback from deadlocking on re-entry.
+
+### Known limitations
+  * Cookie reconciliation state is per request executor, so two protected web views sharing a
+    `WKWebsiteDataStore` (including the process-wide `.default()` store) are not serialized
+    against each other and can observe each other's half-applied WebKit updates. Protect one web
+    view at a time.
+
 ## [0.5] - 2026-06-10
 ### Added
   * `ApproovWebViewConfiguration.allowedOrigins` restricts which frame origins may invoke the native
