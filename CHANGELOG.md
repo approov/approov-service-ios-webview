@@ -5,7 +5,7 @@ All notable changes to this package are documented in this file.
 The format is based on Keep a Changelog and this package follows Semantic Versioning.
 Released versions are tagged in git.
 
-## [Unreleased]
+## [0.5.2] - 2026-09-02
 ### Fixed
   * Updated `approov-service-urlsession` to 3.5.12. Task-observer state now stays with each task,
     so tasks created by different sessions can use the same session-local identifier without
