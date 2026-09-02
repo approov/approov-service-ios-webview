@@ -1,7 +1,7 @@
 // swift-tools-version:5.10
 import PackageDescription
 
-let approovURLSessionPackageVersion = "3.5.7"
+let approovURLSessionPackageVersion = "3.5.12"
 let approovSDKVersion = "3.5.3"
 
 let package = Package(
