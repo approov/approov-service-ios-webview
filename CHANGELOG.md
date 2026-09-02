@@ -5,6 +5,12 @@ All notable changes to this package are documented in this file.
 The format is based on Keep a Changelog and this package follows Semantic Versioning.
 Released versions are tagged in git.
 
+## [Unreleased]
+### Fixed
+  * Updated `approov-service-urlsession` to 3.5.12. Task-observer state now stays with each task,
+    so tasks created by different sessions can use the same session-local identifier without
+    overwriting each other's configuration or completion handler.
+
 ## [0.5.1] - 2026-07-27
 ### Fixed
   * Concurrent protected WebView requests no longer share their native `HTTPCookieStorage` with
