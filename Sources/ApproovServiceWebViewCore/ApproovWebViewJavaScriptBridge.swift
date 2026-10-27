@@ -570,6 +570,9 @@ package enum ApproovWebViewJavaScriptBridge {
           active: false,
           aborted: false,
           sending: false,
+          generation: 0,
+          requestId: null,
+          sent: false,
           headers: {},
           method: "GET",
           overrideMimeType: null,
@@ -709,9 +712,18 @@ package enum ApproovWebViewJavaScriptBridge {
           },
         });
 
+        const cancelProtectedRequest = () => {
+          if (protectedState.sent && protectedState.requestId) {
+            Promise.resolve(nativeHandler.postMessage({ kind: "cancel", requestId: protectedState.requestId })).catch(() => {});
+          }
+          protectedState.sent = false;
+        };
+
         xhr.open = (method, url, async = true, user = null, password = null) => {
           const resolvedURL = new URL(url, window.location.href).toString();
 
+          cancelProtectedRequest();
+          protectedState.generation += 1;
           protectedState.aborted = false;
           protectedState.sending = false;
           protectedState.active = false;
@@ -817,19 +829,27 @@ package enum ApproovWebViewJavaScriptBridge {
             throw new DOMException("XMLHttpRequest is not opened or send is already in progress", "InvalidStateError");
           }
           protectedState.sending = true;
+          const generation = protectedState.generation;
+          const isCurrent = () => protectedState.active && protectedState.generation === generation && !protectedState.aborted;
+          const requestId = allocateRequestID();
+          protectedState.requestId = requestId;
           void (async () => {
           try {
+            const bodyBase64 = await serializeBody(body);
+            if (!isCurrent()) return;
+            protectedState.sent = true;
             const nativeResponse = await nativeHandler.postMessage({
+              requestId,
               url: protectedState.url,
               method: protectedState.method,
               headers: protectedState.headers,
-              bodyBase64: await serializeBody(body),
+              bodyBase64,
               sourcePageURL: window.location.href,
               responseHandling: "response",
               requestSource: "xhr",
             });
 
-            if (protectedState.aborted || !protectedState.active) {
+            if (!isCurrent()) {
               return;
             }
 
@@ -840,17 +860,22 @@ package enum ApproovWebViewJavaScriptBridge {
               Object.entries(nativeResponse.headers).map(([name, value]) => [name.toLowerCase(), value]),
             );
 
+            protectedState.sent = false;
             changeProtectedReadyState(2);
+            if (!isCurrent()) return;
             changeProtectedReadyState(3);
+            if (!isCurrent()) return;
             applyProtectedXHRResponseBody(
               protectedState,
               base64ToUint8Array(nativeResponse.bodyBase64),
             );
             changeProtectedReadyState(4);
+            if (!isCurrent()) return;
             xhr.dispatchEvent(makeXHREvent("load"));
+            if (!isCurrent()) return;
             xhr.dispatchEvent(makeXHREvent("loadend"));
           } catch (error) {
-            if (protectedState.aborted || !protectedState.active) {
+            if (!isCurrent()) {
               return;
             }
 

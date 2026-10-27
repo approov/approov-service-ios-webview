@@ -45,9 +45,14 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             }
             let url = payload["url"] as? String ?? ""
             let status = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "status" })?.value.flatMap(Int.init) ?? 200
+            let delay = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "delay" })?.value.flatMap(Double.init) ?? 0
+            let respond = {
             replyHandler(["url": "https://api.example.com/final", "redirected": true,
                           "status": status, "statusText": "OK", "headers": [:],
                           "bodyBase64": "e30="], nil)
+            }
+            if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000, execute: respond) }
+            else { respond() }
         }
     }
 
@@ -208,6 +213,20 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             let rejected = false;
             try { xhr.send(); } catch (error) { rejected = error.name === 'InvalidStateError'; }
             await done; return rejected;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testXHRReopenIgnoresOldReply() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); let loads = 0; xhr.onload = () => loads++;
+            xhr.open('GET', 'https://api.example.com/?status=201&delay=80'); xhr.send();
+            await new Promise(resolve => setTimeout(resolve, 10));
+            xhr.open('GET', 'https://api.example.com/?status=202');
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
+            await new Promise(resolve => setTimeout(resolve, 100));
+            return xhr.status === 202 && loads === 1;
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }
