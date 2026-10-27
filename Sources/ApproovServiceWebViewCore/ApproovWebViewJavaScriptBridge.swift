@@ -255,7 +255,7 @@ package enum ApproovWebViewJavaScriptBridge {
           || form.getAttribute("action")
           || window.location.href;
 
-        return new URL(rawAction, window.location.href).toString();
+        return new URL(rawAction, document.baseURI).toString();
       };
 
       const resolveFormMethod = (form, submitter) => {
@@ -779,7 +779,7 @@ package enum ApproovWebViewJavaScriptBridge {
         };
 
         xhr.open = (method, url, async = true, user = null, password = null) => {
-          const resolvedURL = new URL(url, window.location.href).toString();
+          const resolvedURL = new URL(url, document.baseURI).toString();
           const protectedURL = isProtectedEndpoint(resolvedURL);
           let validator = null;
           if (protectedURL) {

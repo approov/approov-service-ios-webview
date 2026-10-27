@@ -325,4 +325,15 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRUsesDocumentBaseURI() async throws {
+        let view = await fixture()
+        await load(view, html: "<html><head><base href='https://api.example.com/relative/'></head></html>")
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); xhr.open('GET','echo');
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
+            return JSON.parse(xhr.responseText).url === 'https://api.example.com/relative/echo';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
