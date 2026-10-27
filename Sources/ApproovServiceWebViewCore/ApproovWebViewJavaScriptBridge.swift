@@ -62,6 +62,7 @@ package enum ApproovWebViewJavaScriptBridge {
         ? HTMLFormElement.prototype.requestSubmit
         : null;
       const submitterByForm = new WeakMap();
+      const imageCoordinates = new WeakMap();
       const textDecoder = new TextDecoder();
 
       // Serializes arbitrary request bodies into base64 so Swift receives the
@@ -290,9 +291,28 @@ package enum ApproovWebViewJavaScriptBridge {
         return requestedMode === "response" ? "response" : "navigation";
       };
 
-      const appendSubmitterToFormData = (formData, submitter) => {
-        if (submitter && submitter.name) {
-          formData.append(submitter.name, submitter.value || "");
+      const formDataWithSubmitter = (form, submitter, point) => {
+        if (!submitter || submitter.form !== form || !isSubmitControl(submitter) || submitter.matches(":disabled")) return new FormData(form);
+        // Temporary successful controls preserve document order on iOS versions
+        // whose FormData constructor does not support its submitter argument.
+        const image = submitter instanceof HTMLInputElement && submitter.type === "image";
+        if (!image && !submitter.name) return new FormData(form);
+        const oldID = form.getAttribute("id");
+        const generatedID = oldID || `approov-form-${allocateRequestID()}`;
+        if (!oldID) form.setAttribute("id", generatedID);
+        const entries = image
+          ? [[submitter.name ? `${submitter.name}.x` : "x", String(point?.x || 0)], [submitter.name ? `${submitter.name}.y` : "y", String(point?.y || 0)]]
+          : [[submitter.name, submitter.value]];
+        const controls = entries.map(([name, value]) => {
+          const input = document.createElement("input");
+          input.type = "hidden"; input.name = name; input.value = value; input.setAttribute("form", generatedID);
+          submitter.before(input);
+          return input;
+        });
+        try { return new FormData(form); }
+        finally {
+          controls.forEach(control => control.remove());
+          if (!oldID && form.getAttribute("id") === generatedID) form.removeAttribute("id");
         }
       };
 
@@ -320,7 +340,7 @@ package enum ApproovWebViewJavaScriptBridge {
         return lines.join("\r\n");
       };
 
-      const serializeFormSubmission = async (form, submitter) => {
+      const serializeFormSubmission = async (form, submitter, point) => {
         const method = resolveFormMethod(form, submitter);
         const enctype = resolveFormEnctype(form, submitter);
         const actionURL = resolveFormAction(form, submitter);
@@ -328,9 +348,7 @@ package enum ApproovWebViewJavaScriptBridge {
         if (responseHandling === "navigation" && window.top !== window) {
           throw new DOMException("Protected iframe form navigation is not supported; use response mode", "NotSupportedError");
         }
-        const formData = new FormData(form);
-
-        appendSubmitterToFormData(formData, submitter);
+        const formData = formDataWithSubmitter(form, submitter, point);
 
         let requestURL = new URL(actionURL);
         let body = null;
@@ -381,7 +399,7 @@ package enum ApproovWebViewJavaScriptBridge {
         }
 
         if (element instanceof HTMLInputElement) {
-          return element.type === "submit";
+          return element.type === "submit" || element.type === "image";
         }
 
         return false;
@@ -427,7 +445,7 @@ package enum ApproovWebViewJavaScriptBridge {
         });
       };
 
-      const proxyFormSubmission = async (form, submitter) => {
+      const proxyFormSubmission = async (form, submitter, point = null) => {
         if (form.dataset.approovSubmitting === "true") {
           return;
         }
@@ -435,7 +453,7 @@ package enum ApproovWebViewJavaScriptBridge {
         form.dataset.approovSubmitting = "true";
 
         try {
-          const payload = await serializeFormSubmission(form, submitter);
+          const payload = await serializeFormSubmission(form, submitter, point);
           const nativeResponse = await nativeHandler.postMessage(payload);
 
           if (payload.responseHandling === "response") {
@@ -1035,6 +1053,10 @@ package enum ApproovWebViewJavaScriptBridge {
         }
 
         submitterByForm.set(clickedElement.form, clickedElement);
+        if (clickedElement instanceof HTMLInputElement && clickedElement.type === "image") {
+          imageCoordinates.set(clickedElement, { x: Math.max(0, Math.floor(event.offsetX)), y: Math.max(0, Math.floor(event.offsetY)) });
+          setTimeout(() => imageCoordinates.delete(clickedElement), 0);
+        }
       }, true);
 
       // Reserve the browser default only after ordinary submit listeners run.
@@ -1044,6 +1066,7 @@ package enum ApproovWebViewJavaScriptBridge {
         const form = event.target;
         if (!(form instanceof HTMLFormElement) || !event.cancelable) return;
         const submitter = event.submitter || submitterByForm.get(form) || null;
+        const point = imageCoordinates.get(submitter) || null;
         let cancelled = event.defaultPrevented;
         let reserved = false;
         let failure = null;
@@ -1080,7 +1103,7 @@ package enum ApproovWebViewJavaScriptBridge {
           if (cancelled || !reserved) return;
           if (failure) { handleNativeFormError(form, failure); return; }
           try {
-            if (isNativeHandledForm(form, submitter)) void proxyFormSubmission(form, submitter);
+            if (isNativeHandledForm(form, submitter)) void proxyFormSubmission(form, submitter, point);
             else submitFormWithNativeDefault(form, submitter);
           } catch (error) { handleNativeFormError(form, error); }
         }, 0);

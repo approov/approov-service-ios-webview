@@ -403,4 +403,21 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testFormSubmitterOrderDisabledControlsAndImageCoordinates() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            async function submit(markup, selector) {
+                document.body.innerHTML = '<form method="post" action="https://api.example.com/echo">' + markup + '</form>';
+                const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
+                const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
+                form.requestSubmit(form.querySelector(selector)); return atob((await done).bodyBase64);
+            }
+            const ordered = await submit('<input name="first" value="1"><button name="button" value="2">Go</button><input name="last" value="3">','button');
+            const disabled = await submit('<button disabled name="button" value="2">Go</button><input name="field" value="value">','button');
+            const image = await submit('<input type="image" name="image">','input');
+            return ordered === 'first=1&button=2&last=3' && disabled === 'field=value' && image === 'image.x=0&image.y=0';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
