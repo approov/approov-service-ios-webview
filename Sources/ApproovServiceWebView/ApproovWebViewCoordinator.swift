@@ -9,6 +9,9 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private let encoder = JSONEncoder()
     private let logger: ApproovWebViewLogger
     private weak var webView: WKWebView?
+    private var hasAttachedWebView = false
+
+    var canAttachWebView: Bool { !hasAttachedWebView }
     private var executor: ApproovWebViewRequestExecutor?
     private var executorInitializationError: Error?
     private var didWarnAboutMissingOriginAllowlist = false
@@ -38,6 +41,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
             and data store \(webView.configuration.websiteDataStore.isPersistent ? "persistent" : "non-persistent")
             """
         )
+        hasAttachedWebView = true
         self.webView = webView
         do {
             self.executor = try ApproovWebViewRequestExecutor(

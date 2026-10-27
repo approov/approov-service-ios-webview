@@ -77,6 +77,19 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         XCTAssertEqual(controller.userScripts.count, 1)
     }
 
+    @MainActor
+    func testCoordinatorCannotBeReusedAcrossViews() throws {
+        let configuration = makeConfiguration()
+        let coordinator = ApproovWebViewFactory.makeCoordinator(configuration: configuration)
+        let first = try ApproovWebViewFactory.makeWebView(configuration: configuration, coordinator: coordinator)
+        let second = WKWebView()
+        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: second, configuration: configuration, coordinator: coordinator)) { error in
+            XCTAssertEqual(error as? ApproovWebViewInstallationError, .coordinatorAlreadyAttached)
+        }
+        XCTAssertEqual(second.configuration.userContentController.userScripts.count, 0)
+        withExtendedLifetime(first) {}
+    }
+
     private func makeConfiguration() -> ApproovWebViewConfiguration {
         ApproovWebViewConfiguration(
             approovConfig: "config",

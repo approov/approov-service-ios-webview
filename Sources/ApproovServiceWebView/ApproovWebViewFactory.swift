@@ -22,6 +22,7 @@ public enum ApproovWebViewInstallationError: Error, Equatable {
     case alreadyInstalled
     case javaScriptDisabled
     case contentControllerAlreadyInstalled
+    case coordinatorAlreadyAttached
 }
 
 /// Public entry point for creating or installing an Approov-protected WebView.
@@ -145,6 +146,9 @@ public enum ApproovWebViewFactory {
             throw ApproovWebViewInstallationError.javaScriptDisabled
         }
 
+        guard coordinator.canAttachWebView else {
+            throw ApproovWebViewInstallationError.coordinatorAlreadyAttached
+        }
         let userContentController = webView.configuration.userContentController
         guard objc_getAssociatedObject(userContentController, &controllerAssociationKey) == nil else {
             throw ApproovWebViewInstallationError.contentControllerAlreadyInstalled
