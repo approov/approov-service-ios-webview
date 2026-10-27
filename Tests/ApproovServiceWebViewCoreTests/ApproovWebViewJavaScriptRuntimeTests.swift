@@ -474,4 +474,20 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testFetchHeadersRejectPrototypeAndCallbackMutation() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const response = await fetch('https://api.example.com/'); let prototypeRejected = false; let callbackRejected = false;
+            try { Headers.prototype.set.call(response.headers,'x-test','value'); }
+            catch(error) { prototypeRejected = error instanceof TypeError; }
+            response.headers.forEach((value, key, headers) => {
+                try { headers.set('x-test','value'); } catch(error) { callbackRejected = error instanceof TypeError; }
+            });
+            const internal = Object.getOwnPropertyDescriptor(Response.prototype,'headers').get.call(response);
+            internal.set('x-test','value');
+            return prototypeRejected && callbackRejected && !response.headers.has('x-test') && !response.clone().headers.has('x-test');
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

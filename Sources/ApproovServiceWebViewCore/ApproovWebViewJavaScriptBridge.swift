@@ -208,6 +208,39 @@ package enum ApproovWebViewJavaScriptBridge {
         };
       };
 
+      const immutableResponseHeaders = (values) => {
+        const headers = new Headers(values);
+        const methods = new Map();
+        const proxy = new Proxy(headers, {
+          set() { throw new TypeError("Response headers are immutable"); },
+          defineProperty() { throw new TypeError("Response headers are immutable"); },
+          deleteProperty() { throw new TypeError("Response headers are immutable"); },
+          setPrototypeOf() { throw new TypeError("Response headers are immutable"); },
+          get(target, name, receiver) {
+            if (["append", "delete", "set"].includes(name)) {
+              if (!methods.has(name)) methods.set(name, () => { throw new TypeError("Response headers are immutable"); });
+              return methods.get(name);
+            }
+            if (["get", "has", "entries", "keys", "values", "getSetCookie", "forEach"].includes(name) || name === Symbol.iterator) {
+              const nativeMethod = Reflect.get(target, name, target);
+              if (typeof nativeMethod !== "function") return nativeMethod;
+              if (!methods.has(name)) methods.set(name, function (...args) {
+                if (this !== proxy) throw new TypeError("Invalid Headers receiver");
+                if (name === "forEach") {
+                  const [callback, thisArg] = args;
+                  if (typeof callback !== "function") throw new TypeError("Expected a callback");
+                  return target.forEach((value, key) => callback.call(thisArg, value, key, proxy));
+                }
+                return nativeMethod.apply(target, args);
+              });
+              return methods.get(name);
+            }
+            return Reflect.get(target, name, receiver);
+          },
+        });
+        return proxy;
+      };
+
       const makeFetchResponse = (nativeResponse, requestMethod) => {
         const responseBytes = base64ToUint8Array(nativeResponse.bodyBase64);
         const nullBody = requestMethod === "HEAD" || [204, 205, 304].includes(nativeResponse.status);
@@ -217,13 +250,9 @@ package enum ApproovWebViewJavaScriptBridge {
             url: { value: nativeResponse.url || "", enumerable: true },
             redirected: { value: Boolean(nativeResponse.redirected), enumerable: true },
             type: { value: nativeResponse.type || "basic", enumerable: true },
+            headers: { value: immutableResponseHeaders(nativeResponse.headers), enumerable: true },
             clone: { value: () => decorate(clone()) },
           });
-          for (const name of ["append", "delete", "set"]) {
-            Object.defineProperty(response.headers, name, {
-              value: () => { throw new TypeError("Response headers are immutable"); },
-            });
-          }
           return response;
         };
         return decorate(new Response(nullBody ? null : responseBytes, {
