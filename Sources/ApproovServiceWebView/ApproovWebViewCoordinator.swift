@@ -12,7 +12,8 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private weak var webView: WKWebView?
     private var hasAttachedWebView = false
 
-    var canAttachWebView: Bool { !hasAttachedWebView }
+    var canAttachWebView: Bool { !hasAttachedWebView && !isInvalidated }
+    var configurationID: UUID { configuration.installationID }
     private var executor: ApproovWebViewRequestExecutor?
     private var didWarnAboutMissingOriginAllowlist = false
     typealias Execution = (ApproovWebViewProxyRequest, ApproovWebViewRequestContext) async throws -> ApproovWebViewExecutionResult

@@ -29,6 +29,8 @@ public enum ApproovWebViewInstallationError: Error, Equatable {
     case contentControllerAlreadyInstalled
     case coordinatorAlreadyAttached
     case dataStoreAlreadyInUse
+    case invalidConfiguration(String)
+    case coordinatorConfigurationMismatch
 }
 
 /// Public entry point for creating or installing an Approov-protected WebView.
@@ -146,6 +148,10 @@ public enum ApproovWebViewFactory {
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator
     ) throws {
+        try validate(configuration)
+        guard coordinator.configurationID == configuration.installationID else {
+            throw ApproovWebViewInstallationError.coordinatorConfigurationMismatch
+        }
         let logger = ApproovWebViewLogger(configuration: configuration)
         let bridgeScriptSource =
             ApproovServiceWebViewCore.ApproovWebViewJavaScriptBridge.scriptSource(
@@ -217,6 +223,45 @@ public enum ApproovWebViewFactory {
             ),
             on: webView
         )
+    }
+
+    /// Reject configuration errors before registering WebKit handlers or scripts.
+    private static func validate(_ configuration: ApproovWebViewConfiguration) throws {
+        func require(_ condition: Bool, _ field: String) throws {
+            if !condition { throw ApproovWebViewInstallationError.invalidConfiguration(field) }
+        }
+        try require(configuration.maximumConcurrentRequests > 0, "maximumConcurrentRequests")
+        try require(configuration.maximumRequestBodyBytes > 0, "maximumRequestBodyBytes")
+        try require(configuration.maximumResponseBodyBytes > 0, "maximumResponseBodyBytes")
+        try require(!configuration.bridgeHandlerName.isEmpty &&
+            configuration.bridgeHandlerName.utf8.count <= 256 &&
+            !configuration.bridgeHandlerName.contains("\0"), "bridgeHandlerName")
+        let headerToken = CharacterSet(charactersIn: "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+        try require(!configuration.approovTokenHeaderName.isEmpty &&
+            configuration.approovTokenHeaderName.unicodeScalars.allSatisfy(headerToken.contains), "approovTokenHeaderName")
+        try require(configuration.approovTokenHeaderPrefix.unicodeScalars.allSatisfy {
+            $0.value >= 0x20 && $0.value != 0x7f
+        }, "approovTokenHeaderPrefix")
+        for endpoint in configuration.protectedEndpoints {
+            try require(endpoint.scheme == "https" || endpoint.scheme == "http", "protectedEndpoints.scheme")
+            var components = URLComponents()
+            components.scheme = endpoint.scheme
+            components.host = endpoint.host
+            try require(!endpoint.host.isEmpty && components.url?.host?.lowercased() == endpoint.host &&
+                !endpoint.host.contains("*") && !endpoint.host.contains("@"), "protectedEndpoints.host")
+        }
+        for rule in configuration.allowedOrigins {
+            if rule == "*" { continue }
+            let candidate = rule.replacingOccurrences(of: "://*.", with: "://")
+            guard let components = URLComponents(string: candidate) else {
+                throw ApproovWebViewInstallationError.invalidConfiguration("allowedOrigins")
+            }
+            try require((components.scheme == "https" || components.scheme == "http") &&
+                components.host?.isEmpty == false && components.user == nil && components.password == nil &&
+                (components.path.isEmpty || components.path == "/") && components.query == nil &&
+                components.fragment == nil && !candidate.contains("*") &&
+                (components.port == nil || (1...65_535).contains(components.port!)), "allowedOrigins")
+        }
     }
 
     @MainActor

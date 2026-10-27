@@ -105,6 +105,36 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         XCTAssertEqual(third.configuration.userContentController.userScripts.count, 0)
     }
 
+    @MainActor
+    func testInvalidConfigurationIsRejectedBeforeWebKitMutation() throws {
+        let configurations = [
+            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [], maximumConcurrentRequests: 0),
+            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [], maximumRequestBodyBytes: -1),
+            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [], approovTokenHeaderName: "bad\r\nheader"),
+            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: ["https://user:password@app.example.com"]),
+            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: ["https://app.example.com/path"])
+        ]
+        for configuration in configurations {
+            let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+            XCTAssertThrowsError(try ApproovWebViewFactory.install(on: view, configuration: configuration)) { error in
+                guard case .invalidConfiguration = error as? ApproovWebViewInstallationError else {
+                    return XCTFail("Expected configuration error, got \(error)")
+                }
+            }
+            XCTAssertTrue(view.configuration.userContentController.userScripts.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testCoordinatorPolicyCannotDifferFromInstalledScriptPolicy() throws {
+        let coordinator = ApproovWebViewFactory.makeCoordinator(configuration: makeConfiguration())
+        let view = WKWebView()
+        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: view, configuration: makeConfiguration(), coordinator: coordinator)) { error in
+            XCTAssertEqual(error as? ApproovWebViewInstallationError, .coordinatorConfigurationMismatch)
+        }
+        XCTAssertTrue(view.configuration.userContentController.userScripts.isEmpty)
+    }
+
     private func makeConfiguration() -> ApproovWebViewConfiguration {
         ApproovWebViewConfiguration(
             approovConfig: "config",
