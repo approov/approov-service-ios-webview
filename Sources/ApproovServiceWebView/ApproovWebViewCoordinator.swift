@@ -174,6 +174,8 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         }
         executor = nil
         executionOverride = nil
+        // Running executor/cookie tasks keep their own lease until they drain.
+        storeLifetimeOwner = nil
         webView = nil
     }
 

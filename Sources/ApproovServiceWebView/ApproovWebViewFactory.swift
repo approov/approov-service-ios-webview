@@ -23,6 +23,13 @@ private final class ApproovWebViewInstallation: NSObject {
         self.bridgeScriptSource = bridgeScriptSource
         self.coordinator = coordinator
     }
+
+    deinit {
+        // A retained/autoreleased configuration can keep its message handler
+        // alive after the raw WebView is gone. Close that installation promptly.
+        let coordinator = coordinator
+        Task { @MainActor in coordinator.invalidate() }
+    }
 }
 
 /// Errors reported when a bridge cannot be installed safely.

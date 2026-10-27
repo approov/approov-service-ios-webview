@@ -12,6 +12,8 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
 
     func testStoreRemainsReservedAfterViewReleaseUntilCookieFlushDrains() async throws {
         let store = WKWebsiteDataStore.nonPersistent()
+        let retainedController = WKUserContentController()
+        defer { withExtendedLifetime(retainedController) {} }
         let configuration = ApproovWebViewConfiguration(
             approovConfig: "synthetic-config", protectedEndpoints: [],
             allowedOrigins: ["https://shop.example.com"], debugLoggingEnabled: false)
@@ -29,7 +31,7 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         // configuration/controller copies inside a pool, rather than the async test.
         try autoreleasepool {
             coordinator = ApproovWebViewFactory.makeCoordinator(configuration: configuration)
-            first = makeView(store: store)
+            first = makeView(store: store, controller: retainedController)
             releasedView.value = first
             releasedCoordinator.value = coordinator
             try ApproovWebViewFactory.install(
@@ -43,18 +45,18 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         }
         await fulfillment(of: [enteredFlush], timeout: 5)
 
-        // The view and its coordinator are gone, but the old asynchronous cookie
-        // reconciliation still owns its store lease through the cookie bridge.
+        // The raw view is gone and the retained controller still owns its handler.
+        // The old asynchronous cookie reconciliation must keep the lease reserved.
         autoreleasepool {
             first = nil
             coordinator = nil
             XCTAssertNil(releasedView.value)
-            XCTAssertNil(releasedCoordinator.value, "The old coordinator still retains its installation lease")
+            XCTAssertNotNil(releasedCoordinator.value, "The retained controller must keep its handler alive")
             XCTAssertNotNil(releasedBridge.value, "The suspended flush must retain its cookie bridge")
             XCTAssertNotNil(lease.value)
         }
         let replacement = makeView(store: store)
-        autoreleasepool {
+        try autoreleasepool {
             XCTAssertThrowsError(try ApproovWebViewFactory.install(on: replacement, configuration: configuration)) {
                 error in
                 XCTAssertEqual(error as? ApproovWebViewInstallationError, .dataStoreAlreadyInUse)
@@ -65,7 +67,7 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         // Cancellation must not allow a second writer before the suspended
         // WebKit mutation finishes. Cookie reconciliation drains before release.
         flush?.cancel()
-        autoreleasepool {
+        try autoreleasepool {
             XCTAssertThrowsError(try ApproovWebViewFactory.install(on: replacement, configuration: configuration)) {
                 error in
                 XCTAssertEqual(error as? ApproovWebViewInstallationError, .dataStoreAlreadyInUse)
@@ -74,21 +76,60 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         adapter.finishFlush()
         await drain(&flush)
         autoreleasepool {
-            XCTAssertNil(releasedCoordinator.value, "Coordinator survived the raw view")
+            XCTAssertNotNil(releasedCoordinator.value, "The retained old controller keeps its handler alive")
             XCTAssertNil(releasedBridge.value, "Completed flush still retains its cookie bridge")
         }
         await fulfillment(of: [leaseReleased], timeout: 5)
         XCTAssertNil(lease.value)
+        XCTAssertNil((releasedCoordinator.value as? ApproovWebViewCoordinator)?.storeLifetimeOwner,
+                     "Closing the old view must release the coordinator's own lease")
 
         try ApproovWebViewFactory.install(on: replacement, configuration: configuration)
         XCTAssertEqual(replacement.configuration.userContentController.userScripts.count, 1)
         ApproovWebViewFactory.invalidate(on: replacement)
     }
 
-    private func makeView(store: WKWebsiteDataStore) -> WKWebView {
+    func testRawViewReleaseFreesStoreAfterCleanupEvenWhenOldControllerIsRetained() async throws {
+        let store = WKWebsiteDataStore.nonPersistent()
+        let retainedController = WKUserContentController()
+        let configuration = ApproovWebViewConfiguration(
+            approovConfig: "synthetic-config", protectedEndpoints: [],
+            allowedOrigins: ["https://shop.example.com"], debugLoggingEnabled: false)
+        let coordinatorProbe = WeakReference(nil)
+        let lease = WeakReference(nil)
+        let leaseReleased = expectation(description: "closed installation releases its idle lease")
+        var first: WKWebView?
+        try autoreleasepool {
+            let base = WKWebViewConfiguration()
+            base.websiteDataStore = store
+            base.userContentController = retainedController
+            let coordinator = ApproovWebViewFactory.makeCoordinator(configuration: configuration)
+            first = WKWebView(frame: .zero, configuration: base)
+            try ApproovWebViewFactory.install(
+                on: XCTUnwrap(first), configuration: configuration, coordinator: coordinator)
+            coordinatorProbe.value = coordinator
+            lease.value = coordinator.storeLifetimeOwner
+            objc_setAssociatedObject(
+                try XCTUnwrap(coordinator.storeLifetimeOwner), &Self.lifetimeProbeKey,
+                LeaseReleaseProbe { leaseReleased.fulfill() }, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+        first = nil
+        // The old controller deliberately keeps the coordinator alive. Closing
+        // the WebView must still drop its idle executor and installation lease.
+        XCTAssertNotNil(coordinatorProbe.value)
+        await fulfillment(of: [leaseReleased], timeout: 5)
+        XCTAssertNil(lease.value)
+        XCTAssertNotNil(coordinatorProbe.value)
+        let replacement = makeView(store: store)
+        try ApproovWebViewFactory.install(on: replacement, configuration: configuration)
+        ApproovWebViewFactory.invalidate(on: replacement)
+        withExtendedLifetime(retainedController) {}
+    }
+
+    private func makeView(store: WKWebsiteDataStore, controller: WKUserContentController? = nil) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = store
-        configuration.userContentController = WKUserContentController()
+        configuration.userContentController = controller ?? WKUserContentController()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         return WKWebView(frame: .zero, configuration: configuration)
     }
