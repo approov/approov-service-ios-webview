@@ -10,8 +10,21 @@ import Foundation
 /// - browser-context header reconstruction
 /// - execution through `ApproovURLSession`
 /// - mapping the result back into either JS response mode or navigation mode
+private enum ApproovWebViewInitializationError: LocalizedError {
+    case incompatibleConfiguration, existingServiceRequired, serviceUnavailable
+    var errorDescription: String? { "Approov service configuration is incompatible with this WebView." }
+}
+
 final actor ApproovWebViewRequestExecutor {
     private static let maximumRedirectCount = 20
+    private static let initializationLock = NSLock()
+    private struct SharedConfiguration: Equatable {
+        let config, header, prefix: String
+        let developmentKey: String?
+        let usesExisting: Bool
+    }
+    private static var sharedConfiguration: SharedConfiguration?
+    private static var ownedHookCompleted = false
 
     private let configuration: ApproovWebViewConfiguration
     private let cookieBridge: ApproovWebViewCookieBridge
@@ -319,22 +332,44 @@ final actor ApproovWebViewRequestExecutor {
             \(configuration.protectedEndpoints.count) protected endpoint(s)
             """
         )
-        ApproovWebViewServiceMutator.installOrUpdateScope(
-            scopeID: scopeID,
-            configuration: configuration
+        let requested = SharedConfiguration(
+            config: trimmedConfig, header: configuration.approovTokenHeaderName,
+            prefix: configuration.approovTokenHeaderPrefix,
+            developmentKey: configuration.approovDevelopmentKey,
+            usesExisting: configuration.usesExistingApproovService
         )
-        try ApproovService.initialize(config: trimmedConfig)
-        ApproovService.setApproovHeader(
-            header: configuration.approovTokenHeaderName,
-            prefix: configuration.approovTokenHeaderPrefix
-        )
-        if let approovDevelopmentKey = configuration.approovDevelopmentKey,
-           !approovDevelopmentKey.isEmpty {
-            logger.debug("Applying Approov development key")
-            ApproovService.setDevKey(devKey: approovDevelopmentKey)
+        Self.initializationLock.lock()
+        defer { Self.initializationLock.unlock() }
+        if let current = Self.sharedConfiguration, current != requested {
+            throw ApproovWebViewInitializationError.incompatibleConfiguration
         }
-        logger.debug("Running host Approov configuration hook")
-        try configuration.configureApproovService()
+        if configuration.usesExistingApproovService {
+            guard ApproovService.isApproovEnabled() else {
+                throw ApproovWebViewInitializationError.serviceUnavailable
+            }
+            guard ApproovService.getApproovTokenHeader().caseInsensitiveCompare(configuration.approovTokenHeaderName) == .orderedSame else {
+                throw ApproovWebViewInitializationError.incompatibleConfiguration
+            }
+        } else if Self.sharedConfiguration == nil {
+            guard !ApproovService.isInitialized() else {
+                throw ApproovWebViewInitializationError.existingServiceRequired
+            }
+            try ApproovService.initialize(config: trimmedConfig)
+            ApproovService.setApproovHeader(header: configuration.approovTokenHeaderName,
+                                            prefix: configuration.approovTokenHeaderPrefix)
+            if let key = configuration.approovDevelopmentKey, !key.isEmpty {
+                ApproovService.setDevKey(devKey: key)
+            }
+            // Preserve ownership even if the setup hook throws, so it can be retried
+            // without resetting a successfully initialized shared service.
+            Self.sharedConfiguration = requested
+        }
+        if !configuration.usesExistingApproovService && !Self.ownedHookCompleted {
+            try configuration.configureApproovService()
+            Self.ownedHookCompleted = true
+        }
+        Self.sharedConfiguration = requested
+        ApproovWebViewServiceMutator.installOrUpdateScope(scopeID: scopeID, configuration: configuration)
 
         didInitializeApproov = true
         logger.debug("Approov initialization completed for scope \(scopeID)")
