@@ -69,17 +69,21 @@ private final class WebKitCookieStoreAdapter:
 @MainActor
 package final class ApproovWebViewCookieBridge {
     private let store: any ApproovWebViewCookieStoreAdapter
+    // Keeps the owning installation's store lease alive until cookie work drains.
+    private let lifetimeOwner: AnyObject?
     private var mutationTail: Task<Void, Never>?
     private var mutationGeneration: UInt64 = 0
 
-    package convenience init(store: WKHTTPCookieStore) {
-        self.init(storeAdapter: WebKitCookieStoreAdapter(store: store))
+    package convenience init(store: WKHTTPCookieStore, lifetimeOwner: AnyObject? = nil) {
+        self.init(storeAdapter: WebKitCookieStoreAdapter(store: store), lifetimeOwner: lifetimeOwner)
     }
 
     package init(
-        storeAdapter: any ApproovWebViewCookieStoreAdapter
+        storeAdapter: any ApproovWebViewCookieStoreAdapter,
+        lifetimeOwner: AnyObject? = nil
     ) {
         self.store = storeAdapter
+        self.lifetimeOwner = lifetimeOwner
     }
 
     package func allCookies() async -> [HTTPCookie] {

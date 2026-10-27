@@ -4,9 +4,12 @@ import ObjectiveC
 import UIKit
 import WebKit
 
+private final class ApproovWebViewStoreLease: NSObject {}
+
 private final class ApproovWebViewStoreOwner: NSObject {
-    weak var webView: WKWebView?
-    init(webView: WKWebView) { self.webView = webView }
+    // The store cannot own its lease: the executor's cookie bridge owns the store.
+    weak var lease: AnyObject?
+    init(lease: AnyObject) { self.lease = lease }
 }
 
 private final class ApproovWebViewInstallation: NSObject {
@@ -178,7 +181,7 @@ public enum ApproovWebViewFactory {
         }
         let dataStore = webView.configuration.websiteDataStore
         if let owner = objc_getAssociatedObject(dataStore, &storeAssociationKey) as? ApproovWebViewStoreOwner,
-            owner.webView != nil
+            owner.lease != nil
         {
             throw ApproovWebViewInstallationError.dataStoreAlreadyInUse
         }
@@ -215,11 +218,12 @@ public enum ApproovWebViewFactory {
             name: configuration.bridgeHandlerName
         )
 
-        coordinator.attach(webView: webView)
+        let storeLease = ApproovWebViewStoreLease()
+        coordinator.attach(webView: webView, lifetimeOwner: storeLease)
         objc_setAssociatedObject(
             userContentController, &controllerAssociationKey, true as NSNumber, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         objc_setAssociatedObject(
-            dataStore, &storeAssociationKey, ApproovWebViewStoreOwner(webView: webView),
+            dataStore, &storeAssociationKey, ApproovWebViewStoreOwner(lease: storeLease),
             .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         setInstallation(

@@ -14,6 +14,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
     var canAttachWebView: Bool { !hasAttachedWebView && !isInvalidated }
     var configurationID: UUID { configuration.installationID }
+    private(set) var storeLifetimeOwner: AnyObject?
     private var executor: ApproovWebViewRequestExecutor?
     private var didWarnAboutMissingOriginAllowlist = false
     typealias Execution = (ApproovWebViewProxyRequest, ApproovWebViewRequestContext) async throws ->
@@ -50,7 +51,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
     /// Attaches the concrete `WKWebView` after construction so the
     /// request-execution pipeline can reuse the WebKit cookie store.
-    func attach(webView: WKWebView) {
+    func attach(webView: WKWebView, lifetimeOwner: AnyObject? = nil) {
         // Reinstallation on an already-attached web view must not rebuild the
         // executor: a fresh executor means a fresh cookie jar, which discards
         // any tombstone still waiting to be mirrored into WebKit and re-runs
@@ -69,12 +70,14 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
             """
         )
         hasAttachedWebView = true
+        self.storeLifetimeOwner = lifetimeOwner
         self.webView = webView
         do {
             self.executor = try ApproovWebViewRequestExecutor(
                 configuration: configuration,
                 cookieBridge: ApproovWebViewCookieBridge(
-                    store: webView.configuration.websiteDataStore.httpCookieStore
+                    store: webView.configuration.websiteDataStore.httpCookieStore,
+                    lifetimeOwner: lifetimeOwner
                 )
             )
         } catch {
