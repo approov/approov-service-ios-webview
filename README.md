@@ -100,6 +100,11 @@ Unmatched requests continue through WebKit unchanged.
 | `approovDevelopmentKey` | Optional development key applied after initialization. |
 | `allowRequestsWithoutApproovToken` | Controls fail-open vs fail-closed behavior when Approov cannot produce a token. |
 | `interceptXMLHttpRequests` | Enables or disables JavaScript `XMLHttpRequest` interception. Default: `true`. |
+| `interceptForms` | Enables supported main-frame form interception. Default: `true`. |
+| `maximumRequestBodyBytes` | Maximum buffered request body size. Default: 10 MiB. |
+| `maximumResponseBodyBytes` | Maximum buffered response body size. Default: 10 MiB. |
+| `maximumConcurrentRequests` | Maximum active native bridge requests per view. Default: 16. |
+| `usesExistingApproovService` | Uses the service that the host already initialized. Default: `false`. |
 | `configureApproovService` | Hook for one-time Approov setup beyond the default initialization path. |
 | `mutateRequest` | Native-only request mutation point for secrets or headers that must not be exposed to page JavaScript. |
 | `debugLoggingEnabled` | Enables opt-in debug `OSLog` output for the native bridge lifecycle. |
@@ -124,7 +129,7 @@ ApproovWebViewConfiguration(
     ],
     // The frame origin(s) allowed to use the bridge. Required: set this to the
     // origin that hosts your funnel so untrusted frames cannot call the bridge.
-    allowedOrigins: ["https://funnel.example.com"]
+    allowedOrigins: ["https://app.example.com"]
 )
 ```
 
@@ -169,14 +174,15 @@ struct ProtectedWebExperience: View {
                 pathPrefix: "/v1/private"
             )
         ],
-        allowedOrigins: ["https://funnel.example.com"],
-        debugLoggingEnabled: true,
-        approovDevelopmentKey: "<your-development-key>",
+        allowedOrigins: ["https://app.example.com"],
+        // Development keys belong in debug builds only.
+        approovDevelopmentKey: nil,
         mutateRequest: { request in
             var request = request
             request.setValue("<api-key>", forHTTPHeaderField: "Api-Key")
             return request
-        }
+        },
+        debugLoggingEnabled: false
     )
 
     var body: some View {
@@ -220,7 +226,7 @@ let configuration = ApproovWebViewConfiguration(
             pathPrefix: "/v1/private"
         )
     ],
-    allowedOrigins: ["https://funnel.example.com"]
+    allowedOrigins: ["https://app.example.com"]
 )
 
 let webView = try ApproovWebViewFactory.makeWebView(
@@ -314,3 +320,7 @@ Factory installation throws when the view, content controller, coordinator, or
 data store is already in use. Use one coordinator and content controller per
 view and an isolated website data store. Factory-created views use a fresh
 nonpersistent store. Install before loading and handle installation failures.
+
+## Production integration
+
+See the [production integration guide](Documentation/ProductionIntegration.md) for User-Agent preparation, session refresh, release keys, HTTP errors, and retries.
