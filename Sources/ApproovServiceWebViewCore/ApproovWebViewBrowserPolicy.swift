@@ -152,7 +152,11 @@ package enum ApproovWebViewBrowserPolicy {
     }
 
     private static func lowercased(_ headers: [String: String]) -> [String: String] {
-        headers.reduce(into: [:]) { result, entry in result[entry.key.lowercased()] = entry.value }
+        headers.reduce(into: [:]) { result, entry in
+            let name = entry.key.lowercased()
+            if let previous = result[name] { result[name] = previous + "," + entry.value }
+            else { result[name] = entry.value }
+        }
     }
 
     private static func tokens(_ value: String?) -> [String] {

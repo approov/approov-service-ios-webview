@@ -247,6 +247,7 @@ public enum ApproovWebViewFactory {
             $0.value >= 0x20 && $0.value != 0x7f
         }, "approovTokenHeaderPrefix")
         for endpoint in configuration.protectedEndpoints {
+            try require(endpoint.port.map { (1...65535).contains($0) } ?? true, "protectedEndpoints.port")
             try require(endpoint.scheme == "https" || endpoint.scheme == "http", "protectedEndpoints.scheme")
             var components = URLComponents()
             components.scheme = endpoint.scheme

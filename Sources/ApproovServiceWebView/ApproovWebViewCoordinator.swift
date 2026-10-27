@@ -126,6 +126,10 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
             replyHandler(nil, "The native bridge has reached its request limit.")
             return
         }
+        guard Self.isBoundedPayload(body, maximumBodyBytes: configuration.maximumRequestBodyBytes) else {
+            replyHandler(nil, "The WebView request payload exceeds the supported shape or size.")
+            return
+        }
         do {
             let data = try JSONSerialization.data(withJSONObject: body, options: [])
             let request = try decoder.decode(ApproovWebViewProxyRequest.self, from: data)
@@ -198,6 +202,34 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
     private static func validRequestID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 128
+    }
+
+    /// Reject nested/unknown values before JSONSerialization makes another copy.
+    static func isBoundedPayload(_ body: [String: Any], maximumBodyBytes: Int) -> Bool {
+        let stringFields: Set<String> = ["url", "method", "sourcePageURL", "responseHandling", "requestSource",
+            "requestId", "credentials", "mode", "redirect", "cache", "integrity", "referrer", "referrerPolicy"]
+        guard body.count <= stringFields.count + 2, maximumBodyBytes >= 0 else { return false }
+        for (name, value) in body {
+            if name == "headers" {
+                guard let headers = value as? [String: Any], headers.count <= 128 else { return false }
+                var bytes = 0
+                for (key, value) in headers {
+                    guard let value = value as? String, key.utf8.count <= 256, value.utf8.count <= 64 * 1024 else { return false }
+                    bytes += key.utf8.count + value.utf8.count
+                    guard bytes <= 64 * 1024 else { return false }
+                }
+            } else if name == "bodyBase64" {
+                if value is NSNull { continue }
+                let (base, overflow) = (maximumBodyBytes / 3).multipliedReportingOverflow(by: 4)
+                let (limit, remainderOverflow) = base.addingReportingOverflow(maximumBodyBytes % 3 == 0 ? 0 : 4)
+                guard !overflow, !remainderOverflow, let text = value as? String, text.utf8.count <= limit else { return false }
+            } else {
+                guard stringFields.contains(name) else { return false }
+                if value is NSNull { continue }
+                guard let text = value as? String, text.utf8.count <= 16 * 1024 else { return false }
+            }
+        }
+        return true
     }
 
     private func start(

@@ -185,7 +185,10 @@ private final class LoopbackServer: @unchecked Sendable {
             return
         }
         if path == "/events" {
-            connection.send(content: Data("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in })
+            let event = "data: synthetic\n\n"
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                + String(event.utf8.count, radix: 16) + "\r\n" + event + "\r\n"
+            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in })
             return
         }
         let body = path == "/small" ? Data("synthetic".utf8) : Data(repeating: 65, count: 32 * 1024)
