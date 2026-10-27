@@ -55,7 +55,11 @@ final class ApproovWebViewBootstrapTests: XCTestCase {
         let group=DispatchGroup()
         for _ in 0..<20 {
             group.enter()
-            queue.async { defer { group.leave() }; XCTAssertNoThrow(try service.install(bootstrap,requested)) }
+            queue.async {
+                defer { group.leave() }
+                do { try service.install(bootstrap, requested) }
+                catch { XCTFail("Concurrent bootstrap failed: \(error)") }
+            }
         }
         XCTAssertEqual(group.wait(timeout:.now()+5),.success)
         XCTAssertEqual(service.events.filter { $0 == "initialize" }.count,1)

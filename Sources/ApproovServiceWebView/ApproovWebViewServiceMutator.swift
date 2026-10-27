@@ -91,7 +91,7 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
     /// `ApproovWebViewConfiguration` and its closures (which may capture secrets)
     /// alive indefinitely.
     static func removeScope(_ scopeID: String) {
-        stateQueue.sync {
+        _ = stateQueue.sync {
             scopePolicies.removeValue(forKey: scopeID)
         }
     }

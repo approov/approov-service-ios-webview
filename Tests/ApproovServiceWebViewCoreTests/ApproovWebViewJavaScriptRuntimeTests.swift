@@ -59,7 +59,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                           "status": status, "statusText": "OK", "headers": ["content-type": contentType],
                           "bodyBase64": body], nil)
             }
-            if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000, execute: respond) }
+            if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000) { respond() } }
             else { respond() }
         }
     }
