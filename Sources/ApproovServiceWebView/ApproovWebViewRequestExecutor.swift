@@ -45,6 +45,7 @@ final actor ApproovWebViewRequestExecutor {
     deinit {
         // Release this executor's scope policy so the static registry does not
         // grow unbounded as web views are created and destroyed.
+        urlSession.invalidateAndCancel()
         ApproovWebViewServiceMutator.removeScope(scopeID)
     }
 
