@@ -6,29 +6,33 @@ Some tasks define explicit unsupported behavior instead of full browser parity.
 
 ## Simulator results
 
-The complete suite passed on October 27, 2026, with Xcode 27.1 (27A9275).
-The iOS 27 run also passed on a newly created simulator after the cold-start fixture correction.
-That correction gives WebKit document startup a 30-second bound and stops before JavaScript after a failed load.
-It does not change library behavior or the test assertions.
-The fixtures use separate nonpersistent website stores, matching the factory default.
-On fresh iOS 26.5 devices, the old persistent-store fixture failed its first navigation.
-The isolated-store fixture passed all seven comparison tests.
-Both checks ran six cookie tests before the first browser test.
+The complete application-hosted suite passed on October 27, 2026, with Xcode 27.1 (27A9275).
+The tested implementation and harness are commit `b128739`.
+The suite contains 195 regression tests and two checks of the application host.
+Each run used a newly created simulator.
 
-| Simulator | Tested revision | Passed | Failed | Skipped |
-| --- | --- | ---: | ---: | ---: |
-| Fresh iPhone 18 Pro, iOS 27.0 (24A434) | `276e039` | 195 | 0 | 0 |
-| Fresh iPhone 17 Pro, iOS 26.5 (23F77) | `a3b7984` | 195 | 0 | 0 |
-| iPhone 16 Pro, iOS 18.6 (22G86) | `f5f871b` | 195 | 0 | 0 |
+| Simulator | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| iPhone 18 Pro, iOS 27.0 (24A434) | 197 | 0 | 0 |
+| iPhone 17 Pro, iOS 26.5 (23F77) | 197 | 0 | 0 |
+| iPhone 16 Pro, iOS 18.6 (22G86) | 197 | 0 | 0 |
 
-Each run includes 98 service tests and 97 core tests.
+Each run includes 99 service tests and 98 core tests.
 The JavaScript runtime class contains 43 tests in real WKWebViews.
 These tests compare selected XHR and form behavior with native WebKit.
 Three hosted-checkout fixtures exercise the bridge, executor, redirect cookies, form response, and cancellation together.
 Seven transport tests cover real loopback sockets, the production delegate, bounded responses, cancellation, resource timeout, and signing-marker behavior.
 Cookie tests also use real WebKit stores, concurrent mutations, and delayed teardown.
 
+The tests run inside a UIKit app with a scene and window.
+Two environment checks establish that each test bundle uses this app host.
+Framework-only runs exposed intermittent WebKit document-startup failures before bridge messages arrived.
+The harness provides an application context and isolated website stores.
+Document loading has a bounded deadline and reports failures before JavaScript execution.
+The UI fixtures use the host scene and observe actual view deallocation before testing store reuse.
+
 Strict Swift formatting and `git diff --check` passed.
+The SwiftUI README example passed compiler type checking against the simulator SDK.
 An isolated customer example compiled with the local 0.6 package and the throwing installation API.
 That build used synthetic configuration values and did not run against customer servers.
 
@@ -40,10 +44,14 @@ Run the suite with an installed iOS simulator:
 bash Scripts/test-simulator.sh <simulator-UDID>
 ```
 
-Without a UDID, the script selects an available iPhone on the newest installed iOS runtime.
+Without a UDID, the script selects an available iPhone on the newest installed compatible iOS runtime.
+The harness requires Xcode 16 or later and iOS 17 or later.
+The library deployment requirement remains iOS 15.
 The script builds before execution and retains the logs and `tests.xcresult` under `.build/simulator-results`.
 The CI workflow runs the same script and uploads these files as `simulator-test-evidence`.
-The script signs only the generated simulator copy of the Approov framework for local loading.
+Xcode performs standard ad-hoc signing for the app, test bundles, and embedded frameworks.
+No development team or manual SDK signing is required.
+See the [test-host instructions](../Tests/SimulatorHost/README.md) for the project structure and regeneration command.
 
 ## What the results establish
 
