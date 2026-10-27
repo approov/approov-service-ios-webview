@@ -332,22 +332,24 @@ package enum ApproovWebViewJavaScriptBridge {
         // whose FormData constructor does not support its submitter argument.
         const image = submitter instanceof HTMLInputElement && submitter.type === "image";
         if (!image && !submitter.name) return new FormData(form);
+        const external = submitter.closest("form") !== form;
         const oldID = form.getAttribute("id");
         const generatedID = oldID || `approov-form-${allocateRequestID()}`;
-        if (!oldID) form.setAttribute("id", generatedID);
+        if (external && !oldID) form.setAttribute("id", generatedID);
         const entries = image
           ? [[submitter.name ? `${submitter.name}.x` : "x", String(point?.x || 0)], [submitter.name ? `${submitter.name}.y` : "y", String(point?.y || 0)]]
           : [[submitter.name, submitter.value]];
         const controls = entries.map(([name, value]) => {
           const input = document.createElement("input");
-          input.type = "hidden"; input.name = name; input.value = value; input.setAttribute("form", generatedID);
+          input.type = "hidden"; input.name = name; input.value = value;
+          if (external) input.setAttribute("form", generatedID);
           submitter.before(input);
           return input;
         });
         try { return new FormData(form); }
         finally {
           controls.forEach(control => control.remove());
-          if (!oldID && form.getAttribute("id") === generatedID) form.removeAttribute("id");
+          if (external && !oldID && form.getAttribute("id") === generatedID) form.removeAttribute("id");
         }
       };
 
@@ -1274,7 +1276,10 @@ package enum ApproovWebViewJavaScriptBridge {
         HTMLFormElement.prototype.requestSubmit = function (submitter) {
           observeShadowRoot(this.getRootNode());
           submitterByForm.delete(this);
-          if (submitter) submitterByForm.set(this, submitter);
+          if (submitter) {
+            imageCoordinates.delete(submitter);
+            submitterByForm.set(this, submitter);
+          }
           try { return originalRequestSubmit.call(this, submitter); }
           finally { submitterByForm.delete(this); }
         };

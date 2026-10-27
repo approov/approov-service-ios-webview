@@ -622,4 +622,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testSubmitterFormDataEventWithRepeatedNamesAndDuplicateFormIDs() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            document.body.innerHTML = '<form id="same"></form><form id="same" method="post" action="https://api.example.com/echo"><input name="field" value="before"><button name="field" value="button">Go</button><input name="field" value="after"></form>';
+            const form = document.forms[1]; form.dataset.approovSubmitMode = 'response'; let observed = '';
+            form.addEventListener('formdata', event => observed = event.formData.getAll('field').join(','));
+            const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
+            form.requestSubmit(form.querySelector('button')); const payload = await done;
+            return observed === 'before,button,after' && atob(payload.bodyBase64) === 'field=before&field=button&field=after';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
