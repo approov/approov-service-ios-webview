@@ -64,6 +64,64 @@ final class ApproovWebViewCoordinatorTests: XCTestCase {
         withExtendedLifetime(view) {}
     }
 
+    func testIframeNavigationIsRejectedWithoutChangingTopLevelPageOrHistory() async throws {
+        let reported = expectation(description: "iframe navigation rejection")
+        let configuration = makeConfiguration()
+        let coordinator = ApproovWebViewCoordinator(configuration: configuration) { _, _ in
+            XCTFail("An iframe navigation must not execute natively")
+            return Self.response()
+        }
+        let view = try ApproovWebViewFactory.makeWebView(configuration: configuration, coordinator: coordinator)
+        let resultHandler = FixtureMessageHandler { message in
+            guard let result = message.body as? [String: Any] else { return XCTFail("Missing fixture result") }
+            XCTAssertTrue((result["error"] as? String)?.contains("main frame") == true)
+            XCTAssertEqual(result["sameURL"] as? Bool, true)
+            XCTAssertEqual(result["sameHistory"] as? Bool, true)
+            reported.fulfill()
+        }
+        view.configuration.userContentController.add(resultHandler, name: "fixtureResult")
+        let script = """
+        var beforeURL = top.location.href, beforeHistory = top.history.length;
+        window.webkit.messageHandlers.approovBridge.postMessage({
+            url: 'https://api.example.com/v1', method: 'POST', headers: {},
+            responseHandling: 'navigation', requestSource: 'form'
+        }).then(function () { throw new Error('Unexpected navigation'); }).catch(function (error) {
+            window.webkit.messageHandlers.fixtureResult.postMessage({error: String(error),
+                sameURL: top.location.href === beforeURL, sameHistory: top.history.length === beforeHistory});
+        });
+        """
+        let document = "<iframe srcdoc=\"<script>" + script.replacingOccurrences(of: "\"", with: "&quot;") + "</script>\"></iframe>"
+        view.loadHTMLString(document, baseURL: URL(string: "https://app.example.com/main"))
+        await fulfillment(of: [reported], timeout: 5)
+        XCTAssertEqual(view.url?.host, "app.example.com")
+        withExtendedLifetime(view) {}
+    }
+
+    func testMainFrameNavigationRendersNativeResponse() async throws {
+        let navigated = expectation(description: "simulated main frame navigation")
+        let configuration = makeConfiguration()
+        let destination = URL(string: "https://app.example.com/complete")!
+        let response = HTTPURLResponse(url: destination, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/html; charset=utf-8"])!
+        let html = "<script>window.webkit.messageHandlers.fixtureResult.postMessage(location.href)</script>"
+        let coordinator = ApproovWebViewCoordinator(configuration: configuration) { _, context in
+            XCTAssertTrue(context.isMainFrame)
+            return .navigation(ApproovWebViewNavigationLoad(request: URLRequest(url: destination),
+                response: response, data: Data(html.utf8)))
+        }
+        let view = try ApproovWebViewFactory.makeWebView(configuration: configuration, coordinator: coordinator)
+        let resultHandler = FixtureMessageHandler { message in
+            XCTAssertEqual(message.body as? String, destination.absoluteString)
+            navigated.fulfill()
+        }
+        view.configuration.userContentController.add(resultHandler, name: "fixtureResult")
+        let script = Self.postMessageScript.replacingOccurrences(of: "responseHandling: 'response'", with: "responseHandling: 'navigation'")
+        view.loadHTMLString("<script>" + script + "</script>", baseURL: URL(string: "https://app.example.com/main"))
+        await fulfillment(of: [navigated], timeout: 5)
+        XCTAssertEqual(view.url, destination)
+        withExtendedLifetime(view) {}
+    }
+
     private func makeConfiguration() -> ApproovWebViewConfiguration {
         ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: ["https://app.example.com"])
     }
@@ -80,4 +138,13 @@ final class ApproovWebViewCoordinatorTests: XCTestCase {
         responseHandling: 'response', requestSource: 'fetch'
     }).catch(function () {});
     """
+}
+
+@MainActor
+private final class FixtureMessageHandler: NSObject, WKScriptMessageHandler {
+    private let receive: (WKScriptMessage) -> Void
+    init(receive: @escaping (WKScriptMessage) -> Void) { self.receive = receive }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        receive(message)
+    }
 }

@@ -130,6 +130,10 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                 replyHandler(nil, "The sending frame has no supported browser origin.")
                 return
             }
+            guard proxyRequest.responseHandling != .navigation || context.isMainFrame else {
+                replyHandler(nil, "Protected form navigation is supported only in the main frame.")
+                return
+            }
             logger.debug("Received bridge request: \(proxyRequest.logDescription)")
 
             Task {
