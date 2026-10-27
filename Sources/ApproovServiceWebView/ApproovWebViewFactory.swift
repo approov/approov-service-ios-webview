@@ -157,7 +157,9 @@ public enum ApproovWebViewFactory {
             ApproovServiceWebViewCore.ApproovWebViewJavaScriptBridge.scriptSource(
                 handlerName: configuration.bridgeHandlerName,
                 protectedEndpoints: configuration.protectedEndpoints,
-                xhrBridgeEnabled: configuration.interceptXMLHttpRequests
+                xhrBridgeEnabled: configuration.interceptXMLHttpRequests,
+                maxRequestBodyBytes: configuration.maximumRequestBodyBytes,
+                formBridgeEnabled: configuration.interceptForms
             )
 
         guard installation(for: webView) == nil else {
