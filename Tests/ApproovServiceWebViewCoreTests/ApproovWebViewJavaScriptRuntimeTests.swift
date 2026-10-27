@@ -51,7 +51,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             let delay = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "delay" })?.value.flatMap(Double.init) ?? 0
             let responseBody = url.contains("/invalid-json") ? Data("invalid json".utf8).base64EncodedString() : url.contains("/echo")
                 ? (try? JSONSerialization.data(withJSONObject: payload))?.base64EncodedString() ?? "e30=" : "e30="
-            let body = url.contains("/xml") ? Data("<root>value</root>".utf8).base64EncodedString()
+            let body = url.contains("/empty") ? "" : url.contains("/xml") ? Data("<root>value</root>".utf8).base64EncodedString()
                 : url.contains("/latin1") ? Data([0x63, 0x61, 0x66, 0xe9]).base64EncodedString() : responseBody
             let contentType = url.contains("/xml") ? "application/xml" : url.contains("/latin1") ? "text/plain;charset=windows-1252" : "application/json"
             let respond = {
@@ -588,9 +588,12 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             }
             const native = await lifecycle(window.NativeXHR, 'data:application/json,%7B%7D', false);
             const protectedResult = await lifecycle(XMLHttpRequest, 'https://api.example.com/', false);
+            const nativeEmpty = await lifecycle(window.NativeXHR, 'data:application/json,', false);
+            const protectedEmpty = await lifecycle(XMLHttpRequest, 'https://api.example.com/empty', false);
             const nativeAbort = await lifecycle(window.NativeXHR, 'data:application/json,%7B%7D', true);
             const protectedAbort = await lifecycle(XMLHttpRequest, 'https://api.example.com/?delay=80', true);
             return native.valid && protectedResult.valid && native.events === protectedResult.events &&
+                nativeEmpty.valid && protectedEmpty.valid && nativeEmpty.events === protectedEmpty.events &&
                 nativeAbort.valid && protectedAbort.valid && nativeAbort.events === protectedAbort.events &&
                 nativeAbort.state === protectedAbort.state;
             """, arguments: [:], in: nil, contentWorld: .page)
