@@ -116,7 +116,8 @@ final actor ApproovWebViewRequestExecutor {
         do {
             (data, httpResponse) = try await performPinnedRequestFollowingRedirects(
                 request, credentials: credentials, context: context, mode: mode,
-                pageHeaders: proxyRequest.headers, redirectMode: proxyRequest.redirect ?? "follow"
+                pageHeaders: proxyRequest.headers, redirectMode: proxyRequest.redirect ?? "follow",
+                requestedReferrer: proxyRequest.referrer, referrerPolicy: proxyRequest.referrerPolicy
             )
         } catch {
             // A successful redirect response may already have mutated the jar.
@@ -176,7 +177,8 @@ final actor ApproovWebViewRequestExecutor {
     /// Cookie header is rebuilt for the destination URL.
     private func performPinnedRequestFollowingRedirects(
         _ request: URLRequest, credentials: String, context: ApproovWebViewRequestContext,
-        mode: String, pageHeaders: [String: String], redirectMode: String
+        mode: String, pageHeaders: [String: String], redirectMode: String,
+        requestedReferrer: String?, referrerPolicy: String?
     ) async throws -> (Data, HTTPURLResponse) {
         var currentRequest = request
         var redirectCount = 0
@@ -241,6 +243,16 @@ final actor ApproovWebViewRequestExecutor {
                 &redirectRequest, from: sourceURL,
                 endpoints: configuration.protectedEndpoints
             )
+            redirectRequest.setValue(nil, forHTTPHeaderField: "Referer")
+            redirectRequest.setValue(try ApproovWebViewBrowserPolicy.referrer(
+                pageURL: context.frameURL, sourceOrigin: context.frameOrigin, destination: redirectURL,
+                requestedReferrer: requestedReferrer, policy: referrerPolicy), forHTTPHeaderField: "Referer")
+            if ApproovWebViewBrowserPolicy.isCrossOrigin(redirectURL, sourceOrigin: context.frameOrigin)
+                || shouldApplyOriginHeader(forHTTPMethod: redirectRequest.httpMethod) {
+                redirectRequest.setValue(context.frameOrigin, forHTTPHeaderField: "Origin")
+            } else {
+                redirectRequest.setValue(nil, forHTTPHeaderField: "Origin")
+            }
             redirectRequest.setValue(nil, forHTTPHeaderField: "Cookie")
             if allowsCookies(credentials: credentials, url: redirectURL, context: context) {
                 nativeCookieJar.prepareRedirect(&redirectRequest, for: redirectURL)
