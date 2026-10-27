@@ -75,9 +75,15 @@ final class ApproovWebViewResponseCookiesTests: XCTestCase {
             XCTAssertTrue(ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":header],url:url).isEmpty, header)
         }
     }
-    func testHostPrefixDuplicateNamesAreRejected() {
-        let header="__Host-id=1; Secure; Path=/, __Host-id=2; Secure; Path=/"
-        XCTAssertTrue(ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":header],url:url).isEmpty)
+    func testHostPrefixDuplicateNamesPreserveOrderAndDeletion() {
+        let header="__Host-id=1; Secure; Path=/, __Host-id=2; Secure; Path=/, __Host-id=; Secure; Path=/; Max-Age=0"
+        let cookies=ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["sEt-CoOkIe":header],url:url)
+        XCTAssertEqual(cookies.map(\.value),["1","2",""])
+        XCTAssertLessThanOrEqual(cookies.last?.expiresDate ?? .distantFuture,Date())
+    }
+    func testCookieHeaderArrayRetainsOrder() {
+        let cookies=ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":["session=1; Path=/","session=2; Path=/"]],url:url)
+        XCTAssertEqual(cookies.map(\.value),["1","2"])
     }
     func testFoldedExpiresAndHostPrefix() {
         let header="regular=1; Expires=Wed, 09 Jun 2038 10:18:14 GMT; Path=/, __Host-id=1; Secure; Path=/"
