@@ -321,6 +321,57 @@ data store is already in use. Use one coordinator and content controller per
 view and an isolated website data store. Factory-created views use a fresh
 nonpersistent store. Install before loading and handle installation failures.
 
+| Request | Native bridge behavior |
+| --- | --- |
+| Matching page `fetch` | Uses native execution within supported request policies. |
+| Matching XHR | Uses native execution when `interceptXMLHttpRequests` is enabled. |
+| Supported main-frame form targeting `_self` | Uses native execution when `interceptForms` is enabled. |
+| Initial `load(_:)`, including POST | Uses WebKit. |
+| Links and other document navigation | Use WebKit. |
+| Images, scripts, styles, and other ordinary subresources | Use WebKit. |
+| Workers and service workers | Use their browser networking context. |
+| Iframe form navigation or another form target | Cannot use simulated main-frame navigation. |
+
+For example, this initial document POST uses WebKit:
+
+```swift
+var initialRequest = URLRequest(url: URL(string: "https://app.example.com/start")!)
+initialRequest.httpMethod = "POST"
+initialRequest.httpBody = Data("session=temporary-bootstrap-value".utf8)
+webView.load(initialRequest)
+```
+
+A matching endpoint rule does not add an Approov token to that initial POST.
+If the initial document needs Approov, send it through a native Approov transport before displaying the response.
+Handle document rendering and its cookies explicitly in that host integration.
+
+A hosted page can send a protected API request through the supported bridge:
+
+```javascript
+const response = await fetch('https://api.example.com/v1/private/session', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'start' })
+});
+if (!response.ok) {
+    showRetry();
+}
+```
+
+This example requires the API endpoint rule and the trusted page origin rule.
+Its backend must also permit the required CORS origin, methods, headers, and credentials.
+If a worker, asset, or another navigation needs Approov, use an explicit Approov-aware transport for that request.
+
+Protected bridge messages require a verified HTTP or HTTPS frame origin.
+For local demos, serve the page through HTTP localhost or HTTPS and configure its exact origin.
+Opaque frames and `file:` pages cannot supply a protected browser context.
+
+Each bridge response is buffered within the configured body limits.
+Unsupported browser policies reject protected requests instead of silently changing their meaning.
+Use a new view for a new installation policy.
+Changes to the SwiftUI host's content or configuration replace its WebView and cancel pending requests.
+
 ## Production integration
 
 See the [production integration guide](Documentation/ProductionIntegration.md) for User-Agent preparation, session refresh, release keys, HTTP errors, and retries.
