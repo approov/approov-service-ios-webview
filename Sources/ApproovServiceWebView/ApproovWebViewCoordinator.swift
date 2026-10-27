@@ -3,6 +3,7 @@ import WebKit
 
 /// Receives JavaScript bridge messages and delegates execution to the actor
 /// that owns the native request pipeline.
+@MainActor
 public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWithReply {
     private let configuration: ApproovWebViewConfiguration
     private let decoder = JSONDecoder()
@@ -15,6 +16,15 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private var executor: ApproovWebViewRequestExecutor?
     private var executorInitializationError: Error?
     private var didWarnAboutMissingOriginAllowlist = false
+    typealias Execution = (ApproovWebViewProxyRequest, ApproovWebViewRequestContext) async throws -> ApproovWebViewExecutionResult
+    private var executionOverride: Execution?
+
+    // The production initializer always uses the protected native executor.
+    // Tests replace execution to inspect real WKFrameInfo without network traffic.
+    convenience init(configuration: ApproovWebViewConfiguration, execution: @escaping Execution) {
+        self.init(configuration: configuration)
+        self.executionOverride = execution
+    }
 
     public init(configuration: ApproovWebViewConfiguration) {
         self.configuration = configuration
@@ -82,7 +92,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
             return
         }
 
-        guard let executor else {
+        guard executor != nil || executionOverride != nil else {
             if let executorInitializationError {
                 logger.error(
                     """
@@ -111,11 +121,27 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                 ApproovWebViewProxyRequest.self,
                 from: bodyData
             )
+            guard let context = Self.requestContext(
+                frameURL: message.frameInfo.request.url,
+                frameOrigin: Self.originString(from: message.frameInfo.securityOrigin),
+                mainDocumentURL: webView?.url,
+                isMainFrame: message.frameInfo.isMainFrame
+            ) else {
+                replyHandler(nil, "The sending frame has no supported browser origin.")
+                return
+            }
             logger.debug("Received bridge request: \(proxyRequest.logDescription)")
 
             Task {
                 do {
-                    let executionResult = try await executor.execute(proxyRequest)
+                    let executionResult: ApproovWebViewExecutionResult
+                    if let executionOverride {
+                        executionResult = try await executionOverride(proxyRequest, context)
+                    } else if let executor {
+                        executionResult = try await executor.execute(proxyRequest, context: context)
+                    } else {
+                        throw ApproovWebViewBridgeError.webViewUnavailable
+                    }
 
                     switch executionResult {
                     case let .response(proxyResponse):
@@ -182,13 +208,43 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     }
 
     private static func originString(from securityOrigin: WKSecurityOrigin) -> String {
-        let scheme = securityOrigin.`protocol`
-        let host = securityOrigin.host
-        if securityOrigin.port == 0 {
-            return "\(scheme)://\(host)"
-        }
+        var components = URLComponents()
+        components.scheme = securityOrigin.`protocol`.lowercased()
+        components.host = securityOrigin.host.lowercased()
+        if securityOrigin.port != 0 { components.port = securityOrigin.port }
+        return components.string ?? ""
+    }
 
-        return "\(scheme)://\(host):\(securityOrigin.port)"
+    /// Builds context exclusively from WebKit's frame metadata. A frame URL
+    /// such as about:blank may inherit an HTTPS origin without an HTTPS URL.
+    static func requestContext(
+        frameURL: URL?, frameOrigin: String, mainDocumentURL: URL?, isMainFrame: Bool
+    ) -> ApproovWebViewRequestContext? {
+        guard let originURL = URL(string: frameOrigin),
+              let origin = normalizedOrigin(originURL) else { return nil }
+        let verifiedURL: URL
+        if let frameURL, normalizedOrigin(frameURL) == origin {
+            verifiedURL = frameURL
+        } else {
+            verifiedURL = originURL
+        }
+        return ApproovWebViewRequestContext(
+            frameURL: verifiedURL, frameOrigin: origin,
+            mainDocumentURL: mainDocumentURL, isMainFrame: isMainFrame
+        )
+    }
+
+    private static func normalizedOrigin(_ url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        if let port = url.port, port != (scheme == "https" ? 443 : 80) {
+            components.port = port
+        }
+        return components.string
     }
 
     private func makeReplyObject(from response: ApproovWebViewProxyResponse) throws -> Any {
