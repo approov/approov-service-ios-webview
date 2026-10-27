@@ -17,6 +17,8 @@ public enum ApproovWebViewContent {
 public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
     public let scheme: String
     public let host: String
+    /// Nil selects the standard port for the scheme, not every port.
+    public let port: Int?
     public let pathPrefix: String
     public let excludedPathPrefixes: [String]
 
@@ -24,12 +26,15 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
         scheme: String = "https",
         host: String,
         pathPrefix: String,
-        excludedPathPrefixes: [String] = []
+        excludedPathPrefixes: [String] = [],
+        port: Int? = nil
     ) {
         self.scheme = scheme.lowercased()
         self.host = host.lowercased()
+        self.port = port
         self.pathPrefix = Self.normalizePathPrefix(pathPrefix)
-        self.excludedPathPrefixes = excludedPathPrefixes
+        self.excludedPathPrefixes =
+            excludedPathPrefixes
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .map(Self.normalizePathPrefix)
@@ -37,13 +42,15 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
 
     public func matches(_ url: URL) -> Bool {
         guard let urlScheme = url.scheme?.lowercased(),
-              let urlHost = url.host?.lowercased(),
-              urlScheme == scheme,
-              urlHost == host else {
+            let urlHost = url.host?.lowercased(),
+            urlScheme == scheme,
+            urlHost == host,
+            (url.port ?? Self.defaultPort(for: urlScheme)) == effectivePort
+        else {
             return false
         }
 
-        let urlPath = url.path.isEmpty ? "/" : url.path
+        guard let urlPath = Self.canonicalPath(url) else { return false }
         guard Self.pathMatches(urlPath, pathPrefix: pathPrefix) else {
             return false
         }
@@ -53,13 +60,64 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
         }
     }
 
+    public var effectivePort: Int? { port ?? Self.defaultPort(for: scheme) }
+
+    private static func defaultPort(for scheme: String) -> Int? {
+        scheme == "https" ? 443 : scheme == "http" ? 80 : nil
+    }
+
     private static func normalizePathPrefix(_ pathPrefix: String) -> String {
         let trimmed = pathPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return "/"
         }
 
-        return trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+        var result = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+        while result.count > 1 && result.hasSuffix("/") { result.removeLast() }
+        return canonicalEncodedPath(result) ?? result
+    }
+
+    /// Match the encoded browser path after decoding unreserved bytes only.
+    /// Encoded separators and dot segments are rejected rather than dispatched
+    /// through different browser, Foundation and server interpretations.
+    package static func canonicalPath(_ url: URL) -> String? {
+        guard let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath else { return nil }
+        return canonicalEncodedPath(path.isEmpty ? "/" : path)
+    }
+
+    private static func canonicalEncodedPath(_ path: String) -> String? {
+        let bytes = Array(path.utf8)
+        var result = ""
+        var index = 0
+        let hex = Array("0123456789ABCDEF".utf8)
+        while index < bytes.count {
+            let byte = bytes[index]
+            if byte == 92 { return nil }
+            if byte == 37 {
+                guard index + 2 < bytes.count,
+                    let high = Int(String(UnicodeScalar(bytes[index + 1])), radix: 16),
+                    let low = Int(String(UnicodeScalar(bytes[index + 2])), radix: 16)
+                else { return nil }
+                let value = UInt8(high * 16 + low)
+                guard value != 47 && value != 92 else { return nil }
+                if (65...90).contains(value) || (97...122).contains(value) || (48...57).contains(value)
+                    || [45, 46, 95, 126].contains(value)
+                {
+                    result.append(Character(UnicodeScalar(value)))
+                } else {
+                    result +=
+                        "%" + String(UnicodeScalar(hex[Int(value / 16)])) + String(UnicodeScalar(hex[Int(value % 16)]))
+                }
+                index += 3
+            } else {
+                result.append(Character(UnicodeScalar(byte)))
+                index += 1
+            }
+        }
+        guard
+            !result.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == "." || $0 == ".." })
+        else { return nil }
+        return result
     }
 
     private static func pathMatches(_ urlPath: String, pathPrefix: String) -> Bool {
@@ -77,6 +135,9 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
 /// behavior should be driven through these properties instead of editing the
 /// bridge internals.
 public struct ApproovWebViewConfiguration: Sendable {
+    /// Copies of one configuration retain identity. New configurations require
+    /// a fresh installation, even when their visible scalar values match.
+    public let installationID = UUID()
     /// Your Approov onboarding string.
     public let approovConfig: String
 
@@ -125,6 +186,16 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// behavior and only needs Approov interception for `fetch` or forms.
     public let interceptXMLHttpRequests: Bool
 
+    public let interceptForms: Bool
+    public let maximumRequestBodyBytes: Int
+    public let maximumResponseBodyBytes: Int
+    public let maximumConcurrentRequests: Int
+    public let maximumRequestDuration: TimeInterval
+
+    /// The host initializes and configures ApproovURLSession itself in this mode.
+    /// The bridge composes its scope policy without resetting shared service state.
+    public let usesExistingApproovService: Bool
+
     /// Gives the host app one place to run one-time Approov setup.
     ///
     /// Typical uses include setting a development key or enabling additional
@@ -156,9 +227,15 @@ public struct ApproovWebViewConfiguration: Sendable {
         approovDevelopmentKey: String? = nil,
         allowRequestsWithoutApproovToken: Bool = false,
         interceptXMLHttpRequests: Bool = true,
+        interceptForms: Bool = true,
+        maximumRequestBodyBytes: Int = 10 * 1024 * 1024,
+        maximumResponseBodyBytes: Int = 10 * 1024 * 1024,
+        maximumConcurrentRequests: Int = 16,
+        maximumRequestDuration: TimeInterval = 60,
+        usesExistingApproovService: Bool = false,
         configureApproovService: @escaping @Sendable () throws -> Void = {},
         mutateRequest: @escaping @Sendable (URLRequest) -> URLRequest = { $0 },
-        debugLoggingEnabled: Bool = true,
+        debugLoggingEnabled: Bool = false,
         loggerSubsystem: String = Bundle.main.bundleIdentifier ?? "ApproovWebView",
         loggerCategory: String = "ApproovWebViewBridge"
     ) {
@@ -171,6 +248,12 @@ public struct ApproovWebViewConfiguration: Sendable {
         self.approovDevelopmentKey = approovDevelopmentKey
         self.allowRequestsWithoutApproovToken = allowRequestsWithoutApproovToken
         self.interceptXMLHttpRequests = interceptXMLHttpRequests
+        self.interceptForms = interceptForms
+        self.maximumRequestBodyBytes = maximumRequestBodyBytes
+        self.maximumResponseBodyBytes = maximumResponseBodyBytes
+        self.maximumConcurrentRequests = maximumConcurrentRequests
+        self.maximumRequestDuration = maximumRequestDuration
+        self.usesExistingApproovService = usesExistingApproovService
         self.configureApproovService = configureApproovService
         self.mutateRequest = mutateRequest
         self.debugLoggingEnabled = debugLoggingEnabled

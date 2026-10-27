@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ApproovServiceWebViewCore
 
 final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
@@ -64,7 +65,7 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
         XCTAssertTrue(source.contains("window.__approovBridgeEnabled = true;"))
         XCTAssertTrue(source.contains("fetch: true"))
         XCTAssertTrue(source.contains("xhr: xhrBridgeEnabled"))
-        XCTAssertTrue(source.contains("forms: true"))
+        XCTAssertTrue(source.contains("forms: formBridgeEnabled"))
         XCTAssertTrue(source.contains("cookieSync: true"))
         XCTAssertTrue(source.contains("simulatedNavigations: true"))
     }
@@ -77,7 +78,7 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
         )
 
         XCTAssertTrue(source.contains("entry.excludedPathPrefixes"))
-        XCTAssertTrue(source.contains("matchesPathPrefix(pathname, excludedPathPrefix)"))
+        XCTAssertTrue(source.contains("matchesPathPrefix(pathname, canonicalPath(excludedPathPrefix))"))
     }
 
     func testScriptSourceIncludesUnprotectedRequestDiagnosticLogging() {
@@ -89,7 +90,7 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
 
         XCTAssertTrue(source.contains("kind: \"diagnostic\""))
         XCTAssertTrue(source.contains("event: \"unprotected-request-bypass\""))
-        XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"fetch\", request.url)"))
+        XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"fetch\", bypassURL)"))
         XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"xhr\", resolvedURL)"))
         XCTAssertTrue(source.contains("logUnprotectedRequestBypass(\"form\", actionURL)"))
     }

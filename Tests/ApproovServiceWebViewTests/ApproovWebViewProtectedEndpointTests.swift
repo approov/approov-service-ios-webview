@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ApproovServiceWebViewCore
 
 final class ApproovWebViewProtectedEndpointTests: XCTestCase {
@@ -36,7 +37,8 @@ final class ApproovWebViewProtectedEndpointTests: XCTestCase {
 
         XCTAssertTrue(endpoint.matches(URL(string: "https://store.example.com/checkout")!))
         XCTAssertFalse(endpoint.matches(URL(string: "https://store.example.com/assets/static/app-config/en-GB.json")!))
-        XCTAssertFalse(endpoint.matches(URL(string: "https://store.example.com/assets/static/content/global.config.post.json")!))
+        XCTAssertFalse(
+            endpoint.matches(URL(string: "https://store.example.com/assets/static/content/global.config.post.json")!))
     }
 
     func testMatchesExcludedPathPrefixesOnlyForFullPathSegments() {

@@ -1,0 +1,91 @@
+name: WebViewTestHarness
+options:
+  projectFormat: xcode16_0
+  deploymentTarget:
+    iOS: '17.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    TARGETED_DEVICE_FAMILY: '1,2'
+    CODE_SIGNING_ALLOWED: YES
+    CODE_SIGN_IDENTITY: '-'
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  ApproovWebView:
+    path: ../..
+targets:
+  WebViewTestHost:
+    type: application
+    platform: iOS
+    sources:
+      - path: Host
+        type: syncedFolder
+    info:
+      path: Host/Info.plist
+      properties:
+        CFBundleDisplayName: WebView Tests
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: TestHostScene
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            127.0.0.1:
+              NSExceptionAllowsInsecureHTTPLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.approov.tests.WebViewTestHost
+        PRODUCT_NAME: WebViewTestHost
+        GENERATE_INFOPLIST_FILE: NO
+  ApproovServiceWebViewCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ../ApproovServiceWebViewCoreTests
+        type: syncedFolder
+      - path: HarnessTests/HostedEnvironmentTests.swift
+    dependencies:
+      - target: WebViewTestHost
+      - package: ApproovWebView
+        product: ApproovServiceWebView
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.approov.tests.ApproovServiceWebViewCoreTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/WebViewTestHost.app/WebViewTestHost
+        BUNDLE_LOADER: $(TEST_HOST)
+  ApproovServiceWebViewTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ../ApproovServiceWebViewTests
+        type: syncedFolder
+      - path: HarnessTests/HostedEnvironmentTests.swift
+    dependencies:
+      - target: WebViewTestHost
+      - package: ApproovWebView
+        product: ApproovServiceWebView
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.approov.tests.ApproovServiceWebViewTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/WebViewTestHost.app/WebViewTestHost
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  WebViewHostedTests:
+    build:
+      targets:
+        WebViewTestHost: all
+        ApproovServiceWebViewCoreTests: [test]
+        ApproovServiceWebViewTests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - name: ApproovServiceWebViewCoreTests
+          parallelizable: false
+        - name: ApproovServiceWebViewTests
+          parallelizable: false

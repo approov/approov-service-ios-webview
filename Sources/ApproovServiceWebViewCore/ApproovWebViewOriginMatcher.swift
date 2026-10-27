@@ -111,7 +111,8 @@ package enum ApproovWebViewOriginMatcher {
                 host = String(remainder[remainder.startIndex..<portSeparator])
                 let portText = String(remainder[remainder.index(after: portSeparator)...])
                 guard let parsedPort = Int(portText),
-                      (1...65_535).contains(parsedPort) else {
+                    (1...65_535).contains(parsedPort)
+                else {
                     return nil
                 }
 

@@ -7,6 +7,10 @@ The package injects a JavaScript bridge into the page, intercepts protected `fet
 > [!IMPORTANT]
 > Only endpoints declared in `protectedEndpoints` are proxied through native networking and protected by Approov.
 
+For an existing integration, see [migration to 0.6](Documentation/MigratingTo0.6.md).
+This branch contains the unreleased 0.6 implementation.
+See the [simulator results and ticket coverage](Documentation/Validation0.6.md) for the regression evidence.
+
 ## Requirements
 
 | Item | Value |
@@ -31,7 +35,7 @@ The package injects a JavaScript bridge into the page, intercepts protected `fet
 dependencies: [
     .package(
         url: "https://github.com/approov/approov-service-ios-webview.git",
-        branch: "main"
+        branch: "0.6"
     )
 ]
 ```
@@ -100,6 +104,12 @@ Unmatched requests continue through WebKit unchanged.
 | `approovDevelopmentKey` | Optional development key applied after initialization. |
 | `allowRequestsWithoutApproovToken` | Controls fail-open vs fail-closed behavior when Approov cannot produce a token. |
 | `interceptXMLHttpRequests` | Enables or disables JavaScript `XMLHttpRequest` interception. Default: `true`. |
+| `interceptForms` | Enables supported main-frame form interception. Default: `true`. |
+| `maximumRequestBodyBytes` | Maximum buffered request body size. Default: 10 MiB. |
+| `maximumRequestDuration` | Native request resource deadline in seconds. Default: 60. |
+| `maximumResponseBodyBytes` | Maximum buffered response body size. Default: 10 MiB. |
+| `maximumConcurrentRequests` | Maximum active native bridge requests per view. Default: 16. |
+| `usesExistingApproovService` | Uses the service that the host already initialized. Default: `false`. |
 | `configureApproovService` | Hook for one-time Approov setup beyond the default initialization path. |
 | `mutateRequest` | Native-only request mutation point for secrets or headers that must not be exposed to page JavaScript. |
 | `debugLoggingEnabled` | Enables opt-in debug `OSLog` output for the native bridge lifecycle. |
@@ -124,7 +134,7 @@ ApproovWebViewConfiguration(
     ],
     // The frame origin(s) allowed to use the bridge. Required: set this to the
     // origin that hosts your funnel so untrusted frames cannot call the bridge.
-    allowedOrigins: ["https://funnel.example.com"]
+    allowedOrigins: ["https://app.example.com"]
 )
 ```
 
@@ -161,7 +171,7 @@ import ApproovServiceWebView
 import SwiftUI
 
 struct ProtectedWebExperience: View {
-    private let configuration = ApproovWebViewConfiguration(
+    @State private var configuration = ApproovWebViewConfiguration(
         approovConfig: "<your-approov-config>",
         protectedEndpoints: [
             ApproovWebViewProtectedEndpoint(
@@ -169,14 +179,15 @@ struct ProtectedWebExperience: View {
                 pathPrefix: "/v1/private"
             )
         ],
-        allowedOrigins: ["https://funnel.example.com"],
-        debugLoggingEnabled: true,
-        approovDevelopmentKey: "<your-development-key>",
+        allowedOrigins: ["https://app.example.com"],
+        // Development keys belong in debug builds only.
+        approovDevelopmentKey: nil,
         mutateRequest: { request in
             var request = request
             request.setValue("<api-key>", forHTTPHeaderField: "Api-Key")
             return request
-        }
+        },
+        debugLoggingEnabled: false
     )
 
     var body: some View {
@@ -220,10 +231,10 @@ let configuration = ApproovWebViewConfiguration(
             pathPrefix: "/v1/private"
         )
     ],
-    allowedOrigins: ["https://funnel.example.com"]
+    allowedOrigins: ["https://app.example.com"]
 )
 
-let webView = ApproovWebViewFactory.makeWebView(
+let webView = try ApproovWebViewFactory.makeWebView(
     configuration: configuration
 )
 
@@ -248,7 +259,7 @@ let webView = WKWebView(frame: .zero, configuration: baseConfiguration)
 webView.scrollView.bounces = true
 webView.backgroundColor = .clear
 
-ApproovWebViewFactory.install(
+try ApproovWebViewFactory.install(
     on: webView,
     configuration: configuration
 )
@@ -294,3 +305,90 @@ This package resolves and uses:
 
 - [`approov-service-urlsession`](https://github.com/approov/approov-service-urlsession)
 - [`approov-ios-sdk`](https://github.com/approov/approov-ios-sdk)
+
+## Routing boundaries and compatibility
+
+The bridge routes matching page `fetch`, enabled XHR, and supported form
+submissions. Initial `WKWebView.load` requests, links, worker traffic and
+ordinary subresources use WebKit networking. They are not automatically
+stamped by the bridge. Protect an endpoint on the server and choose an
+Approov-aware transport for every request that needs a token. A rule for a host
+does not turn its image or script loads into bridged requests.
+
+The bridge is a native networking integration with explicit origin and endpoint
+rules. It should not be assumed to provide every browser networking semantic.
+Test the actual application flow, including credentials, redirects, forms and
+errors, with the deployed service version. Allowed page origins and protected
+API destinations serve different purposes; enumerate both independently.
+
+Factory installation throws when the view, content controller, coordinator, or
+data store is already in use. Use one coordinator and content controller per
+view and an isolated website data store. Factory-created views use a fresh
+nonpersistent store. Install before loading and handle installation failures.
+
+| Request | Native bridge behavior |
+| --- | --- |
+| Matching page `fetch` | Uses native execution within supported request policies. |
+| Matching XHR | Uses native execution when `interceptXMLHttpRequests` is enabled. |
+| Supported main-frame form targeting `_self` | Uses native execution when `interceptForms` is enabled. |
+| Initial `load(_:)`, including POST | Uses WebKit. |
+| Links and other document navigation | Use WebKit. |
+| Images, scripts, styles, and other ordinary subresources | Use WebKit. |
+| Workers and service workers | Use their browser networking context. |
+| Iframe form navigation or another form target | Cannot use simulated main-frame navigation. |
+
+For example, this initial document POST uses WebKit:
+
+```swift
+var initialRequest = URLRequest(url: URL(string: "https://app.example.com/start")!)
+initialRequest.httpMethod = "POST"
+initialRequest.httpBody = Data("session=temporary-bootstrap-value".utf8)
+webView.load(initialRequest)
+```
+
+A matching endpoint rule does not add an Approov token to that initial POST.
+If the initial document needs Approov, send it through a native Approov transport before displaying the response.
+Handle document rendering and its cookies explicitly in that host integration.
+
+A hosted page can send a protected API request through the supported bridge:
+
+```javascript
+const response = await fetch('https://api.example.com/v1/private/session', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'start' })
+});
+if (!response.ok) {
+    showRetry();
+}
+```
+
+This example requires the API endpoint rule and the trusted page origin rule.
+Its backend must also permit the required CORS origin, methods, headers, and credentials.
+If a worker, asset, or another navigation needs Approov, use an explicit Approov-aware transport for that request.
+
+Protected bridge messages require a verified HTTP or HTTPS frame origin.
+For local demos, serve the page through HTTP localhost or HTTPS and configure its exact origin.
+Opaque frames and `file:` pages cannot supply a protected browser context.
+
+Each bridge response is buffered within the configured body limits.
+Unsupported browser policies reject protected requests instead of silently changing their meaning.
+Cross-site credentialed calls, `no-cors`, manual redirects, integrity checks, and streaming are unsupported.
+Native execution uses separate cache behavior from WebKit.
+See the [supported browser behavior](Documentation/ProductionIntegration.md#supported-browser-behavior) before choosing request policies.
+
+## Simulator regression tests
+
+Run `bash Scripts/test-simulator.sh` with an installed iPhone simulator runtime.
+Pass a simulator UDID as the first argument to select a particular runtime.
+The suite uses synthetic data, real WebKit and cookie stores, and local network
+fixtures. It does not require customer credentials or an Approov account.
+Test logs and the result bundle are saved under `.build/simulator-results`.
+The CI workflow runs the same command.
+Use a new view for a new installation policy.
+Changes to the SwiftUI host's content or configuration replace its WebView and cancel pending requests.
+
+## Production integration
+
+See the [production integration guide](Documentation/ProductionIntegration.md) for User-Agent preparation, session refresh, release keys, HTTP errors, and retries.

@@ -23,12 +23,13 @@ let package = Package(
         .package(
             url: "https://github.com/approov/approov-ios-sdk.git",
             exact: Version(stringLiteral: approovSDKVersion)
-        )
+        ),
     ],
     targets: [
         .target(
             name: "ApproovServiceWebViewCore",
-            path: "Sources/ApproovServiceWebViewCore"
+            path: "Sources/ApproovServiceWebViewCore",
+            resources: [.copy("Resources/public_suffix_list.dat")]
         ),
         .target(
             name: "ApproovServiceWebView",
@@ -41,7 +42,7 @@ let package = Package(
                 .product(
                     name: "Approov",
                     package: "approov-ios-sdk"
-                )
+                ),
             ],
             path: "Sources/ApproovServiceWebView"
         ),
@@ -49,7 +50,7 @@ let package = Package(
             name: "ApproovServiceWebViewTests",
             dependencies: [
                 "ApproovServiceWebView",
-                "ApproovServiceWebViewCore"
+                "ApproovServiceWebViewCore",
             ],
             path: "Tests/ApproovServiceWebViewTests"
         ),
@@ -59,6 +60,6 @@ let package = Package(
                 "ApproovServiceWebViewCore"
             ],
             path: "Tests/ApproovServiceWebViewCoreTests"
-        )
+        ),
     ]
 )

@@ -13,3 +13,7 @@ xcuserdata/
 .idea/
 .vscode/
 graphify-out/
+
+# Optional local builds of the simulator test host
+/Tests/SimulatorHost/build/
+/Tests/SimulatorHost/SourcePackages/

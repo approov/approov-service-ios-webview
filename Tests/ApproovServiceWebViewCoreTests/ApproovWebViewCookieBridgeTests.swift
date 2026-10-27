@@ -1,6 +1,7 @@
 import Foundation
 import WebKit
 import XCTest
+
 @testable import ApproovServiceWebViewCore
 
 @available(macOS 10.15, *)
@@ -153,7 +154,7 @@ final class ApproovWebViewCookieBridgeTests: XCTestCase {
                 "delete:session:start",
                 "delete:session:finish",
                 "set:session:new",
-                "read"
+                "read",
             ]
         )
     }
@@ -186,7 +187,7 @@ final class ApproovWebViewCookieBridgeTests: XCTestCase {
                 "delete:session:start",
                 "delete:session:finish",
                 "set:session:new",
-                "read"
+                "read",
             ]
         )
     }
@@ -201,7 +202,7 @@ final class ApproovWebViewCookieBridgeTests: XCTestCase {
             .path: "/",
             .name: name,
             .value: value,
-            .secure: "TRUE"
+            .secure: "TRUE",
         ]
         if httpOnly {
             properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
@@ -225,7 +226,8 @@ final class ApproovWebViewCookieBridgeTests: XCTestCase {
 @available(macOS 10.15, *)
 @MainActor
 private final class ControllableCookieStore:
-    ApproovWebViewCookieStoreAdapter {
+    ApproovWebViewCookieStoreAdapter
+{
     private struct Identity: Hashable {
         let name: String
         let domain: String

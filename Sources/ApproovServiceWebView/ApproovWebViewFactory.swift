@@ -4,6 +4,14 @@ import ObjectiveC
 import UIKit
 import WebKit
 
+private final class ApproovWebViewStoreLease: NSObject {}
+
+private final class ApproovWebViewStoreOwner: NSObject {
+    // The store cannot own its lease: the executor's cookie bridge owns the store.
+    weak var lease: AnyObject?
+    init(lease: AnyObject) { self.lease = lease }
+}
+
 private final class ApproovWebViewInstallation: NSObject {
     let bridgeScriptSource: String
     let coordinator: ApproovWebViewCoordinator
@@ -15,6 +23,24 @@ private final class ApproovWebViewInstallation: NSObject {
         self.bridgeScriptSource = bridgeScriptSource
         self.coordinator = coordinator
     }
+
+    deinit {
+        // A retained/autoreleased configuration can keep its message handler
+        // alive after the raw WebView is gone. Close that installation promptly.
+        let coordinator = coordinator
+        Task { @MainActor in coordinator.invalidate() }
+    }
+}
+
+/// Errors reported when a bridge cannot be installed safely.
+public enum ApproovWebViewInstallationError: Error, Equatable {
+    case alreadyInstalled
+    case javaScriptDisabled
+    case contentControllerAlreadyInstalled
+    case coordinatorAlreadyAttached
+    case dataStoreAlreadyInUse
+    case invalidConfiguration(String)
+    case coordinatorConfigurationMismatch
 }
 
 /// Public entry point for creating or installing an Approov-protected WebView.
@@ -23,6 +49,8 @@ private final class ApproovWebViewInstallation: NSObject {
 /// opinionated and your app needs to work with a raw `WKWebView`.
 public enum ApproovWebViewFactory {
     private static var installationAssociationKey: UInt8 = 0
+    private static var controllerAssociationKey: UInt8 = 0
+    private static var storeAssociationKey: UInt8 = 0
 
     /// Creates a reusable coordinator for a custom host integration.
     @MainActor
@@ -39,16 +67,15 @@ public enum ApproovWebViewFactory {
     ///   protected page load, or reload the page after installation. The bridge
     ///   uses a `WKUserScript` with `.atDocumentStart`, so it cannot retrofit a
     ///   page that has already finished loading.
-    /// - Important: Reinstallation on the same `WKWebView` is treated as a
-    ///   no-op unless the bridge configuration matches exactly. To change the
-    ///   bridge configuration, create a fresh `WKWebView`.
+    /// - Important: A WebView can only be installed once. Create a fresh view
+    ///   to change its configuration.
     @MainActor
     public static func makeWebView(
         content: ApproovWebViewContent? = nil,
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator? = nil,
         baseWebView: WKWebView? = nil
-    ) -> WKWebView {
+    ) throws -> WKWebView {
         let logger = ApproovWebViewLogger(configuration: configuration)
         let coordinator = coordinator ?? makeCoordinator(configuration: configuration)
         let webView = baseWebView ?? makeBaseWebView()
@@ -59,7 +86,7 @@ public enum ApproovWebViewFactory {
             """
         )
 
-        installBridgeIfNeeded(
+        try installBridgeIfNeeded(
             on: webView,
             configuration: configuration,
             coordinator: coordinator
@@ -87,12 +114,12 @@ public enum ApproovWebViewFactory {
         on webView: WKWebView,
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator? = nil
-    ) -> WKWebView {
+    ) throws -> WKWebView {
         let logger = ApproovWebViewLogger(configuration: configuration)
         let coordinator = coordinator ?? makeCoordinator(configuration: configuration)
         logger.debug("Installing Approov bridge on existing WKWebView")
 
-        installBridgeIfNeeded(
+        try installBridgeIfNeeded(
             on: webView,
             configuration: configuration,
             coordinator: coordinator
@@ -101,13 +128,21 @@ public enum ApproovWebViewFactory {
         return webView
     }
 
+    /// Cancels outstanding bridge requests when a custom host closes the view.
+    /// The installation remains closed; create a new view for another session.
+    @MainActor
+    public static func invalidate(on webView: WKWebView) {
+        installation(for: webView)?.coordinator.invalidate()
+        webView.stopLoading()
+    }
+
     @MainActor
     private static func makeBaseWebView() -> WKWebView {
         let userContentController = WKUserContentController()
         let webViewConfiguration = WKWebViewConfiguration()
         webViewConfiguration.userContentController = userContentController
         webViewConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
-        webViewConfiguration.websiteDataStore = .default()
+        webViewConfiguration.websiteDataStore = .nonPersistent()
 
         let webView = WKWebView(frame: .zero, configuration: webViewConfiguration)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -122,37 +157,41 @@ public enum ApproovWebViewFactory {
         on webView: WKWebView,
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator
-    ) {
+    ) throws {
+        try validate(configuration)
+        guard coordinator.configurationID == configuration.installationID else {
+            throw ApproovWebViewInstallationError.coordinatorConfigurationMismatch
+        }
         let logger = ApproovWebViewLogger(configuration: configuration)
         let bridgeScriptSource =
             ApproovServiceWebViewCore.ApproovWebViewJavaScriptBridge.scriptSource(
                 handlerName: configuration.bridgeHandlerName,
                 protectedEndpoints: configuration.protectedEndpoints,
-                xhrBridgeEnabled: configuration.interceptXMLHttpRequests
+                xhrBridgeEnabled: configuration.interceptXMLHttpRequests,
+                maxRequestBodyBytes: configuration.maximumRequestBodyBytes,
+                formBridgeEnabled: configuration.interceptForms
             )
 
-        if let installation = installation(for: webView) {
-            logger.debug("Approov bridge already installed on this WKWebView; reusing existing installation")
-            assert(
-                installation.bridgeScriptSource == bridgeScriptSource,
-                """
-                ApproovWebViewFactory does not support reconfiguring an already-installed WKWebView.
-                Create a fresh WKWebView to change bridge script configuration such as the
-                handler name, protected endpoints, or XHR interception setting.
-                """
-            )
-            installation.coordinator.attach(webView: webView)
-            return
+        guard installation(for: webView) == nil else {
+            throw ApproovWebViewInstallationError.alreadyInstalled
+        }
+        guard webView.configuration.defaultWebpagePreferences.allowsContentJavaScript else {
+            throw ApproovWebViewInstallationError.javaScriptDisabled
         }
 
-        assert(
-            webView.configuration.defaultWebpagePreferences.allowsContentJavaScript,
-            """
-            ApproovWebViewFactory.install(on:) requires a base WKWebView with content JavaScript enabled.
-            """
-        )
-
+        guard coordinator.canAttachWebView else {
+            throw ApproovWebViewInstallationError.coordinatorAlreadyAttached
+        }
         let userContentController = webView.configuration.userContentController
+        guard objc_getAssociatedObject(userContentController, &controllerAssociationKey) == nil else {
+            throw ApproovWebViewInstallationError.contentControllerAlreadyInstalled
+        }
+        let dataStore = webView.configuration.websiteDataStore
+        if let owner = objc_getAssociatedObject(dataStore, &storeAssociationKey) as? ApproovWebViewStoreOwner,
+            owner.lease != nil
+        {
+            throw ApproovWebViewInstallationError.dataStoreAlreadyInUse
+        }
         logger.debug(
             """
             Installing bridge handler '\(configuration.bridgeHandlerName)' with \
@@ -178,13 +217,7 @@ public enum ApproovWebViewFactory {
             forMainFrameOnly: false
         )
 
-        // The handler name must be unique within a single user content
-        // controller. Removing the page-world handler first makes installation
-        // deterministic when callers reuse their own controller instance.
-        userContentController.removeScriptMessageHandler(
-            forName: configuration.bridgeHandlerName,
-            contentWorld: .page
-        )
+        // The controller and its scripts belong to exactly one installation.
         userContentController.addUserScript(bridgeScript)
         userContentController.addScriptMessageHandler(
             coordinator,
@@ -192,7 +225,13 @@ public enum ApproovWebViewFactory {
             name: configuration.bridgeHandlerName
         )
 
-        coordinator.attach(webView: webView)
+        let storeLease = ApproovWebViewStoreLease()
+        coordinator.attach(webView: webView, lifetimeOwner: storeLease)
+        objc_setAssociatedObject(
+            userContentController, &controllerAssociationKey, true as NSNumber, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        objc_setAssociatedObject(
+            dataStore, &storeAssociationKey, ApproovWebViewStoreOwner(lease: storeLease),
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         setInstallation(
             ApproovWebViewInstallation(
@@ -203,17 +242,66 @@ public enum ApproovWebViewFactory {
         )
     }
 
+    /// Reject configuration errors before registering WebKit handlers or scripts.
+    private static func validate(_ configuration: ApproovWebViewConfiguration) throws {
+        func require(_ condition: Bool, _ field: String) throws {
+            if !condition { throw ApproovWebViewInstallationError.invalidConfiguration(field) }
+        }
+        try require(configuration.maximumConcurrentRequests > 0, "maximumConcurrentRequests")
+        try require(
+            configuration.maximumRequestDuration.isFinite && configuration.maximumRequestDuration > 0,
+            "maximumRequestDuration")
+        try require(configuration.maximumRequestBodyBytes > 0, "maximumRequestBodyBytes")
+        try require(configuration.maximumResponseBodyBytes > 0, "maximumResponseBodyBytes")
+        try require(
+            !configuration.bridgeHandlerName.isEmpty && configuration.bridgeHandlerName.utf8.count <= 256
+                && !configuration.bridgeHandlerName.contains("\0"), "bridgeHandlerName")
+        let headerToken = CharacterSet(
+            charactersIn: "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+        try require(
+            !configuration.approovTokenHeaderName.isEmpty
+                && configuration.approovTokenHeaderName.unicodeScalars.allSatisfy(headerToken.contains),
+            "approovTokenHeaderName")
+        try require(
+            configuration.approovTokenHeaderPrefix.unicodeScalars.allSatisfy {
+                $0.value >= 0x20 && $0.value != 0x7f
+            }, "approovTokenHeaderPrefix")
+        for endpoint in configuration.protectedEndpoints {
+            try require(endpoint.port.map { (1...65535).contains($0) } ?? true, "protectedEndpoints.port")
+            try require(endpoint.scheme == "https" || endpoint.scheme == "http", "protectedEndpoints.scheme")
+            var components = URLComponents()
+            components.scheme = endpoint.scheme
+            components.host = endpoint.host
+            try require(
+                !endpoint.host.isEmpty && components.url?.host?.lowercased() == endpoint.host
+                    && !endpoint.host.contains("*") && !endpoint.host.contains("@"), "protectedEndpoints.host")
+        }
+        for rule in configuration.allowedOrigins {
+            if rule == "*" { continue }
+            let candidate = rule.replacingOccurrences(of: "://*.", with: "://")
+            guard let components = URLComponents(string: candidate) else {
+                throw ApproovWebViewInstallationError.invalidConfiguration("allowedOrigins")
+            }
+            try require(
+                (components.scheme == "https" || components.scheme == "http") && components.host?.isEmpty == false
+                    && components.user == nil && components.password == nil
+                    && (components.path.isEmpty || components.path == "/") && components.query == nil
+                    && components.fragment == nil && !candidate.contains("*")
+                    && (components.port.map { (1...65_535).contains($0) } ?? true), "allowedOrigins")
+        }
+    }
+
     @MainActor
     private static func load(
         _ content: ApproovWebViewContent,
         into webView: WKWebView
     ) {
         switch content {
-        case let .htmlString(html, baseURL):
+        case .htmlString(let html, let baseURL):
             webView.loadHTMLString(html, baseURL: baseURL)
-        case let .fileURL(fileURL, readAccessURL):
+        case .fileURL(let fileURL, let readAccessURL):
             webView.loadFileURL(fileURL, allowingReadAccessTo: readAccessURL)
-        case let .request(request):
+        case .request(let request):
             webView.load(request)
         }
     }

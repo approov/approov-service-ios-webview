@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import ApproovServiceWebViewCore
 
 final class ApproovWebViewRedirectDelegateTests: XCTestCase {

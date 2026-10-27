@@ -50,8 +50,7 @@ package final class ApproovWebViewNativeCookieJar {
     package struct WebKitFlush {
         package let cookiesToDelete: [HTTPCookie]
         package let cookiesToSet: [HTTPCookie]
-        fileprivate let responseMutationGenerations:
-            [CookieIdentity: UInt64]
+        fileprivate let responseMutationGenerations: [CookieIdentity: UInt64]
     }
 
     fileprivate struct CookieIdentity: Hashable {
@@ -78,8 +77,7 @@ package final class ApproovWebViewNativeCookieJar {
     private var previousWebKitCookieIdentities: Set<CookieIdentity> = []
     private var nextWebKitSnapshotTicket: UInt64 = 0
     private var lastAppliedWebKitSnapshotTicket: UInt64 = 0
-    private var responseMutationBarriers:
-        [CookieIdentity: ResponseMutationBarrier] = [:]
+    private var responseMutationBarriers: [CookieIdentity: ResponseMutationBarrier] = [:]
     private var pendingWebKitSets: [CookieIdentity: HTTPCookie] = [:]
     private var pendingWebKitDeletions: [CookieIdentity: HTTPCookie] = [:]
     private var nextResponseMutationGeneration: UInt64 = 0
@@ -168,10 +166,10 @@ package final class ApproovWebViewNativeCookieJar {
     /// mirror was being applied may still contain the pre-mirror WebKit state.
     package func completeWebKitFlush(_ flush: WebKitFlush) {
         let rebasedTicket = nextWebKitSnapshotTicket
-        for (identity, completedGeneration) in
-            flush.responseMutationGenerations {
+        for (identity, completedGeneration) in flush.responseMutationGenerations {
             guard var barrier = responseMutationBarriers[identity],
-                  barrier.responseMutationGeneration == completedGeneration else {
+                barrier.responseMutationGeneration == completedGeneration
+            else {
                 continue
             }
 
@@ -230,7 +228,8 @@ package final class ApproovWebViewNativeCookieJar {
             pendingWebKitDeletions.removeValue(forKey: identity)
         }
 
-        let deletedIdentities = previousWebKitCookieIdentities
+        let deletedIdentities =
+            previousWebKitCookieIdentities
             .subtracting(currentIdentities)
             .subtracting(protectedIdentities)
             .union(confirmedMissingIdentities)
@@ -258,8 +257,9 @@ package final class ApproovWebViewNativeCookieJar {
         request.httpShouldHandleCookies = false
 
         guard request.value(forHTTPHeaderField: "Cookie") == nil,
-              let cookies = storage.cookies(for: url),
-              !cookies.isEmpty else {
+            let cookies = storage.cookies(for: url),
+            !cookies.isEmpty
+        else {
             return
         }
 
@@ -312,7 +312,8 @@ package final class ApproovWebViewNativeCookieJar {
             )
 
             if let expiresDate = cookie.expiresDate, expiresDate <= Date() {
-                let deletionCookie = storedCookie(withIdentity: identity)
+                let deletionCookie =
+                    storedCookie(withIdentity: identity)
                     ?? cookie
                 deleteCookie(withIdentity: identity)
                 pendingWebKitSets.removeValue(forKey: identity)
