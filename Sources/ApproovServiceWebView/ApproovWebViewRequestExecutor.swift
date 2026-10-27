@@ -121,7 +121,7 @@ final actor ApproovWebViewRequestExecutor {
         if let testTransport { try testTransport.bootstrap() } else { try initializeApproovIfNeeded() }
 
         var request = requestContext.request
-        if allowsCookies(credentials: credentials, url: requestContext.requestURL, context: context) {
+        if try allowsCookies(credentials: credentials, url: requestContext.requestURL, context: context) {
             nativeCookieJar.prepare(&request, for: requestContext.requestURL)
         }
         ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &request)
@@ -233,7 +233,7 @@ final actor ApproovWebViewRequestExecutor {
                     sourceOrigin: context.frameOrigin, credentials: credentials)
             }
             if let responseURL = httpResponse.url,
-               allowsCookies(credentials: credentials, url: responseURL, context: context) {
+               try allowsCookies(credentials: credentials, url: responseURL, context: context) {
                 storeResponseCookies(from: httpResponse)
             }
 
@@ -272,7 +272,7 @@ final actor ApproovWebViewRequestExecutor {
                 redirectRequest.setValue(nil, forHTTPHeaderField: "Origin")
             }
             redirectRequest.setValue(nil, forHTTPHeaderField: "Cookie")
-            if allowsCookies(credentials: credentials, url: redirectURL, context: context) {
+            if try allowsCookies(credentials: credentials, url: redirectURL, context: context) {
                 nativeCookieJar.prepareRedirect(&redirectRequest, for: redirectURL)
             }
             ApproovWebViewServiceMutator.setWebViewScope(
@@ -346,14 +346,14 @@ final actor ApproovWebViewRequestExecutor {
         return (requestURL, request)
     }
 
-    /// Without an authoritative site-for-cookies signal, restrict cookies to
-    /// same-origin frames and top-level documents. This is conservative for
-    /// legitimate cross-origin credentials:include requests.
-    private func allowsCookies(credentials: String, url: URL, context: ApproovWebViewRequestContext) -> Bool {
-        guard ApproovWebViewBrowserPolicy.sendsCredentials(credentials, url: url, sourceOrigin: context.frameOrigin),
-              !ApproovWebViewBrowserPolicy.isCrossOrigin(url, sourceOrigin: context.frameOrigin),
-              let top = context.mainDocumentURL,
-              ApproovWebViewBrowserPolicy.origin(of: top) == context.frameOrigin else { return false }
+    /// WebKit third-party tracking policy is not available to native requests.
+    /// Reject credentialed cross-site requests rather than bypassing it.
+    private func allowsCookies(credentials: String, url: URL, context: ApproovWebViewRequestContext) throws -> Bool {
+        guard ApproovWebViewBrowserPolicy.sendsCredentials(credentials, url: url, sourceOrigin: context.frameOrigin) else { return false }
+        guard ApproovWebViewSitePolicy.isSameSite(frameURL: context.frameURL,
+            mainDocumentURL: context.mainDocumentURL, requestURL: url) else {
+            throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
+        }
         return true
     }
 

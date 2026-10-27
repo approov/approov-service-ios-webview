@@ -5,7 +5,8 @@ import XCTest
 
 @MainActor private final class EmptyCookieStore: ApproovWebViewCookieStoreAdapter {
     var reads = 0
-    func allCookies() async -> [HTTPCookie] { reads += 1; return [] }
+    var cookies: [HTTPCookie] = []
+    func allCookies() async -> [HTTPCookie] { reads += 1; return cookies }
     func setCookie(_ cookie: HTTPCookie) async {}
     func deleteCookie(_ cookie: HTTPCookie) async {}
 }
@@ -56,4 +57,25 @@ import XCTest
         do { _ = try await executor.execute(request(redirect:"error"),context:context); XCTFail("Expected redirect rejection") }
         catch { XCTAssertTrue(error is URLError) }
     }
+    func testSameSiteCrossOriginIncludeSendsCookie() async throws {
+        let store=EmptyCookieStore()
+        store.cookies=[HTTPCookie(properties:[.name:"session",.value:"synthetic",.domain:".example.com",.path:"/",.secure:"TRUE"])!]
+        let executor=try executor(store:store) { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField:"Cookie"), "session=synthetic")
+            return (Data(),HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,
+                headerFields:["Access-Control-Allow-Origin":"https://page.example.com", "Access-Control-Allow-Credentials":"true"])!,nil)
+        }
+        _ = try await executor.execute(request(credentials:"include"), context:context)
+    }
+    func testCrossSiteIncludeIsRejectedBeforeNetwork() async throws {
+        let executor=try executor(store:EmptyCookieStore()) { _ in
+            XCTFail("Cross-site credentialed request must not be sent")
+            throw URLError(.cancelled)
+        }
+        let foreign=ApproovWebViewRequestContext(frameURL:URL(string:"https://other.test/")!,
+            frameOrigin:"https://other.test",mainDocumentURL:URL(string:"https://other.test/")!,isMainFrame:true)
+        do { _ = try await executor.execute(request(credentials:"include"),context:foreign); XCTFail("Expected rejection") }
+        catch { XCTAssertTrue(error is ApproovWebViewBrowserPolicyError) }
+    }
+
 }
