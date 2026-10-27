@@ -593,7 +593,16 @@ package enum ApproovWebViewJavaScriptBridge {
       const applyProtectedXHRResponseBody = (state, responseBytes) => {
         const mime = state.overrideMimeType || state.responseHeaders["content-type"] || "text/xml";
         const essence = mime.split(";", 1)[0].trim().toLowerCase();
-        const charset = /charset\s*=\s*["']?([^;"'\s]+)/i.exec(mime)?.[1];
+        let charset = /charset\s*=\s*["']?([^;"'\s]+)/i.exec(mime)?.[1];
+        if (state.responseType !== "json") {
+          if (responseBytes[0] === 0xef && responseBytes[1] === 0xbb && responseBytes[2] === 0xbf) charset = "utf-8";
+          else if (responseBytes[0] === 0xff && responseBytes[1] === 0xfe) charset = "utf-16le";
+          else if (responseBytes[0] === 0xfe && responseBytes[1] === 0xff) charset = "utf-16be";
+          else if (!charset && (essence === "text/xml" || essence === "application/xml" || essence.endsWith("+xml"))) {
+            const declaration = String.fromCharCode(...responseBytes.subarray(0, 1024));
+            charset = /<\?xml[^>]*encoding\s*=\s*["']([^"']+)/i.exec(declaration)?.[1];
+          }
+        }
         let decoder;
         try { decoder = new TextDecoder(state.responseType === "json" ? "utf-8" : charset || "utf-8"); }
         catch (_) { decoder = new TextDecoder(); }
@@ -973,7 +982,9 @@ package enum ApproovWebViewJavaScriptBridge {
             if (protectedState.readyState === 3 || protectedState.readyState === 4) {
               throw new DOMException("MIME type cannot be changed after loading starts", "InvalidStateError");
             }
-            protectedState.overrideMimeType = String(mimeType);
+            const value = String(mimeType).trim();
+            protectedState.overrideMimeType = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+(?:\s*;.*)?$/.test(value)
+              ? value : "application/octet-stream";
           };
         }
 

@@ -51,10 +51,13 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             let delay = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "delay" })?.value.flatMap(Double.init) ?? 0
             let responseBody = url.contains("/invalid-json") ? Data("invalid json".utf8).base64EncodedString() : url.contains("/echo")
                 ? (try? JSONSerialization.data(withJSONObject: payload))?.base64EncodedString() ?? "e30=" : "e30="
+            let body = url.contains("/xml") ? Data("<root>value</root>".utf8).base64EncodedString()
+                : url.contains("/latin1") ? Data([0x63, 0x61, 0x66, 0xe9]).base64EncodedString() : responseBody
+            let contentType = url.contains("/xml") ? "application/xml" : url.contains("/latin1") ? "text/plain;charset=windows-1252" : "application/json"
             let respond = {
             replyHandler(["url": "https://api.example.com/final", "redirected": true,
-                          "status": status, "statusText": "OK", "headers": ["content-type": "application/json"],
-                          "bodyBase64": responseBody], nil)
+                          "status": status, "statusText": "OK", "headers": ["content-type": contentType],
+                          "bodyBase64": body], nil)
             }
             if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000, execute: respond) }
             else { respond() }
@@ -544,6 +547,27 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
             await new Promise(resolve => setTimeout(resolve, 20));
             return xhr.responseText === '{}' && loads === 1;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testXHRCharsetXMLArrayBufferAndMIMEOverride() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            async function request(path, type = '', mime = null) {
+                const xhr = new XMLHttpRequest(); xhr.open('GET','https://api.example.com/' + path); xhr.responseType = type;
+                if (mime) xhr.overrideMimeType(mime);
+                const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done; return xhr;
+            }
+            const text = await request('latin1');
+            const xml = await request('xml', 'document');
+            const binary = await request('', 'arraybuffer');
+            const blob = await request('', 'blob', 'text/plain;charset=UTF-8');
+            let getterError = false;
+            try { void binary.responseText; } catch(error) { getterError = error.name === 'InvalidStateError'; }
+            return text.responseText === 'café' && xml.response.documentElement.tagName === 'root' &&
+                xml.responseXML === xml.response && binary.response.byteLength === 2 && getterError &&
+                blob.response.type === 'text/plain;charset=utf-8';
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }
