@@ -1109,9 +1109,9 @@ package enum ApproovWebViewJavaScriptBridge {
                 if (bytes.byteLength) {
                   changeProtectedReadyState(3);
                   if (!isCurrent()) return;
+                  xhr.dispatchEvent(makeXHREvent("progress", bytes.byteLength, bytes.byteLength, true));
+                  if (!isCurrent()) return;
                 }
-                xhr.dispatchEvent(makeXHREvent("progress", bytes.byteLength, bytes.byteLength, true));
-                if (!isCurrent()) return;
                 changeProtectedReadyState(4);
                 if (!isCurrent()) return;
                 xhr.dispatchEvent(makeXHREvent("load", bytes.byteLength, bytes.byteLength, true));
