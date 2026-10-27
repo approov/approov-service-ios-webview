@@ -21,6 +21,7 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         let baseConfiguration = WKWebViewConfiguration()
         baseConfiguration.userContentController = WKUserContentController()
         baseConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
+        baseConfiguration.websiteDataStore = .nonPersistent()
 
         let baseWebView = WKWebView(
             frame: .zero,
@@ -66,10 +67,14 @@ final class ApproovWebViewFactoryTests: XCTestCase {
     @MainActor
     func testSharedContentControllerIsRejectedBeforeMutation() throws {
         let controller = WKUserContentController()
-        let config = WKWebViewConfiguration()
-        config.userContentController = controller
-        let first = WKWebView(frame: .zero, configuration: config)
-        let second = WKWebView(frame: .zero, configuration: config)
+        let firstConfiguration = WKWebViewConfiguration()
+        firstConfiguration.userContentController = controller
+        firstConfiguration.websiteDataStore = .nonPersistent()
+        let secondConfiguration = WKWebViewConfiguration()
+        secondConfiguration.userContentController = controller
+        secondConfiguration.websiteDataStore = .nonPersistent()
+        let first = WKWebView(frame: .zero, configuration: firstConfiguration)
+        let second = WKWebView(frame: .zero, configuration: secondConfiguration)
         try ApproovWebViewFactory.install(on: first, configuration: makeConfiguration())
         XCTAssertThrowsError(try ApproovWebViewFactory.install(on: second, configuration: makeConfiguration())) { error in
             XCTAssertEqual(error as? ApproovWebViewInstallationError, .contentControllerAlreadyInstalled)
@@ -117,7 +122,8 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         for configuration in configurations {
             let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
             XCTAssertThrowsError(try ApproovWebViewFactory.install(on: view, configuration: configuration)) { error in
-                guard case .invalidConfiguration = error as? ApproovWebViewInstallationError else {
+                guard let installationError = error as? ApproovWebViewInstallationError,
+                      case .invalidConfiguration = installationError else {
                     return XCTFail("Expected configuration error, got \(error)")
                 }
             }

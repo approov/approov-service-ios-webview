@@ -260,7 +260,7 @@ public enum ApproovWebViewFactory {
                 components.host?.isEmpty == false && components.user == nil && components.password == nil &&
                 (components.path.isEmpty || components.path == "/") && components.query == nil &&
                 components.fragment == nil && !candidate.contains("*") &&
-                (components.port == nil || (1...65_535).contains(components.port!)), "allowedOrigins")
+                (components.port.map { (1...65_535).contains($0) } ?? true), "allowedOrigins")
         }
     }
 
