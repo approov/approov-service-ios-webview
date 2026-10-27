@@ -54,4 +54,16 @@ final class ApproovWebViewBrowserPolicyTests: XCTestCase {
         XCTAssertThrowsError(try ApproovWebViewBrowserPolicy.validatePageHeaders(["X-Test":"a\r\nb"], tokenHeader: "Approov-Token"))
         XCTAssertThrowsError(try ApproovWebViewBrowserPolicy.validateOptions(mode: "no-cors", credentials: "omit", redirect: "follow", cache: "default", integrity: ""))
     }
+    func testMethodValidationRejectsForbiddenAndInvalidTokens() throws {
+        for method in ["CONNECT", "trace", "TRACK", "GET\r\nX: injected", "", "GET value"] {
+            XCTAssertThrowsError(try ApproovWebViewBrowserPolicy.validateMethod(method), method)
+        }
+        XCTAssertEqual(try ApproovWebViewBrowserPolicy.validateMethod("post"), "POST")
+        XCTAssertEqual(try ApproovWebViewBrowserPolicy.validateMethod("customMethod"), "customMethod")
+    }
+
+    func testPageHeadersRejectCaseInsensitiveDuplicates() {
+        XCTAssertThrowsError(try ApproovWebViewBrowserPolicy.validatePageHeaders(["X-Test":"one", "x-test":"two"], tokenHeader:"Approov-Token"))
+    }
+
 }

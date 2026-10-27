@@ -317,7 +317,7 @@ final actor ApproovWebViewRequestExecutor {
         }
 
         var request = URLRequest(url: requestURL)
-        request.httpMethod = proxyRequest.method.isEmpty ? "GET" : proxyRequest.method.uppercased()
+        request.httpMethod = try ApproovWebViewBrowserPolicy.validateMethod(proxyRequest.method)
 
         for (headerName, headerValue) in proxyRequest.headers {
             // Browser-owned context and cookie headers cannot be asserted by page payloads.

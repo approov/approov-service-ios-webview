@@ -38,14 +38,25 @@ package enum ApproovWebViewBrowserPolicy {
               integrity.isEmpty else { throw ApproovWebViewBrowserPolicyError.unsupportedPolicy }
     }
 
+    package static func validateMethod(_ method: String) throws -> String {
+        let tokenCharacters = CharacterSet(charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        guard !method.isEmpty, method.unicodeScalars.allSatisfy({ tokenCharacters.contains($0) }),
+              !["CONNECT", "TRACE", "TRACK"].contains(method.uppercased()) else {
+            throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
+        }
+        return ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"].contains(method.uppercased()) ? method.uppercased() : method
+    }
+
     package static func validatePageHeaders(_ headers: [String: String], tokenHeader: String) throws {
         let forbidden: Set<String> = ["accept-charset", "accept-encoding", "access-control-request-headers",
             "access-control-request-method", "connection", "content-length", "cookie", "cookie2", "date",
             "dnt", "expect", "host", "keep-alive", "origin", "referer", "set-cookie", "te", "trailer",
             "transfer-encoding", "upgrade", "via", tokenHeader.lowercased()]
         let tokenCharacters = CharacterSet(charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        var seen = Set<String>()
         for (name, value) in headers {
             let lower = name.lowercased()
+            guard seen.insert(lower).inserted else { throw ApproovWebViewBrowserPolicyError.invalidHeader }
             guard !name.isEmpty, name.unicodeScalars.allSatisfy({ tokenCharacters.contains($0) }),
                   !value.unicodeScalars.contains(where: { $0.value == 0 || $0.value == 10 || $0.value == 13 }),
                   !forbidden.contains(lower), !lower.hasPrefix("sec-"), !lower.hasPrefix("proxy-") else {
