@@ -112,6 +112,78 @@ Before closing or replacing a raw WebView, call `ApproovWebViewFactory.invalidat
 
 Cancellation cannot undo a server operation that the server already accepted. For payment or booking retries, use the backend's idempotency mechanism.
 
+## Supported browser behavior
+
+The native route supports a defined subset of browser networking.
+It uses verified frame context for origin and referrer policy.
+Cross-origin calls require successful CORS permission checks.
+Non-simple cross-origin calls also require a successful native preflight.
+Native-only signing headers are separate from the page's requested CORS headers.
+
+Same-origin requests can use the default `same-origin` credentials mode.
+Same-site requests between subdomains require `credentials: 'include'` to send cookies.
+For example, `shop.example.com` and `api.example.com` can share an eligible `.example.com` session cookie over HTTPS.
+
+Credentialed cross-site requests are unsupported and reject.
+The native route cannot reproduce WebKit's third-party tracking policy.
+A trusted iframe also needs a same-site top-level document for cookie-bearing native requests.
+Use an application authentication design that stays within these boundaries.
+
+| Feature | Protected bridge behavior |
+| --- | --- |
+| `mode: 'no-cors'` | Unsupported. The bridge rejects the request. |
+| `redirect: 'manual'` | Unsupported. The bridge rejects the request. |
+| Nonempty `integrity` | Unsupported. The bridge rejects the request. |
+| Streaming request body | Unsupported. Use a finite body within the configured limit. |
+| Progressive response streaming | Unsupported. The complete response is buffered before delivery. |
+| WebKit HTTP cache | Separate from native execution. The bridge does not read or populate this cache. |
+| WebKit preflight cache | Separate from native execution. Native preflights do not reuse that cache. |
+
+For predictable native execution, use `cache: 'default'` or `cache: 'no-store'`.
+The bridge's default route bypasses the local HTTP cache.
+Its default behavior therefore differs from an ordinary WebKit request with browser caching.
+Browser cache-specific behavior is outside the supported contract.
+Requests outside the protected rules retain their WebKit networking behavior.
+
+## Navigation error handling
+
+Retain a navigation delegate in a custom host.
+Connect its failure callback to a visible message and a **Try again** button.
+The retry action must prepare a fresh session and view before loading the page again.
+
+```swift
+@MainActor
+final class HostedNavigationHandler: NSObject, WKNavigationDelegate {
+    let showRetry: (String) -> Void
+
+    init(showRetry: @escaping (String) -> Void) {
+        self.showRetry = showRetry
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        showRetry("The page could not open. Try again.")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        showRetry("The page could not open. Try again.")
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if let response = navigationResponse.response as? HTTPURLResponse, response.statusCode >= 400 {
+            showRetry("The service could not open this page. Try again.")
+            decisionHandler(.cancel)
+        } else {
+            decisionHandler(.allow)
+        }
+    }
+}
+```
+
+The page must still inspect protected fetch and XHR HTTP status codes.
+A successful transport with status 400 or greater does not trigger the host's navigation delegate for an API request.
+Keep full native error descriptions and response bodies out of the retry interface and application logs.
+
 ## Check the complete request path
 
 - Make sure that each protected request matches its intended scheme, host, port, and path.

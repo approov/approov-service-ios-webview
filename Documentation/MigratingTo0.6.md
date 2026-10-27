@@ -66,6 +66,9 @@ The form bridge can be disabled with `interceptForms: false`.
 The default request and response body limits are 10 MiB each.
 The default concurrent request limit is 16 per view.
 Unsupported browser policies reject protected requests.
+Cross-site credentialed requests, `no-cors`, manual redirects, nonempty integrity metadata, and streaming are unsupported.
+The native route does not share WebKit's HTTP cache or preflight cache.
+Its default request path bypasses the local HTTP cache.
 Review the [routing boundaries](../README.md#routing-boundaries-and-compatibility) before migrating an initial POST or a worker request.
 
 If the host already initializes Approov, use `usesExistingApproovService: true`.

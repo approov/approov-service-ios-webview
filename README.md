@@ -371,6 +371,9 @@ Opaque frames and `file:` pages cannot supply a protected browser context.
 
 Each bridge response is buffered within the configured body limits.
 Unsupported browser policies reject protected requests instead of silently changing their meaning.
+Cross-site credentialed calls, `no-cors`, manual redirects, integrity checks, and streaming are unsupported.
+Native execution uses separate cache behavior from WebKit.
+See the [supported browser behavior](Documentation/ProductionIntegration.md#supported-browser-behavior) before choosing request policies.
 Use a new view for a new installation policy.
 Changes to the SwiftUI host's content or configuration replace its WebView and cancel pending requests.
 
