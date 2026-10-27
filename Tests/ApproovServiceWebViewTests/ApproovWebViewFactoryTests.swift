@@ -4,8 +4,8 @@ import XCTest
 
 final class ApproovWebViewFactoryTests: XCTestCase {
     @MainActor
-    func testMakeWebViewWithoutInitialContentCreatesProtectedWebView() {
-        let webView = ApproovWebViewFactory.makeWebView(
+    func testMakeWebViewWithoutInitialContentCreatesProtectedWebView() throws {
+        let webView = try ApproovWebViewFactory.makeWebView(
             configuration: makeConfiguration()
         )
 
@@ -17,7 +17,7 @@ final class ApproovWebViewFactoryTests: XCTestCase {
     }
 
     @MainActor
-    func testMakeWebViewReusesProvidedBaseWebView() {
+    func testMakeWebViewReusesProvidedBaseWebView() throws {
         let baseConfiguration = WKWebViewConfiguration()
         baseConfiguration.userContentController = WKUserContentController()
         baseConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -27,7 +27,7 @@ final class ApproovWebViewFactoryTests: XCTestCase {
             configuration: baseConfiguration
         )
 
-        let configuredWebView = ApproovWebViewFactory.makeWebView(
+        let configuredWebView = try ApproovWebViewFactory.makeWebView(
             configuration: makeConfiguration(),
             baseWebView: baseWebView
         )
@@ -40,9 +40,9 @@ final class ApproovWebViewFactoryTests: XCTestCase {
     }
 
     @MainActor
-    func testInstallDoesNotDuplicateBridgeScriptOnSameWebView() {
+    func testInstallRejectsReinstallationWithoutChangingScript() throws {
         let configuration = makeConfiguration()
-        let webView = ApproovWebViewFactory.makeWebView(
+        let webView = try ApproovWebViewFactory.makeWebView(
             configuration: configuration
         )
 
@@ -51,10 +51,11 @@ final class ApproovWebViewFactoryTests: XCTestCase {
             1
         )
 
-        ApproovWebViewFactory.install(
-            on: webView,
-            configuration: configuration
-        )
+        XCTAssertThrowsError(try ApproovWebViewFactory.install(
+            on: webView, configuration: configuration
+        )) { error in
+            XCTAssertEqual(error as? ApproovWebViewInstallationError, .alreadyInstalled)
+        }
 
         XCTAssertEqual(
             webView.configuration.userContentController.userScripts.count,

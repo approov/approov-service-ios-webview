@@ -20,11 +20,11 @@ public struct ApproovWebView: UIViewRepresentable {
     }
 
     public func makeUIView(context: Context) -> WKWebView {
-        ApproovWebViewFactory.makeWebView(
+        (try? ApproovWebViewFactory.makeWebView(
             content: content,
             configuration: configuration,
             coordinator: context.coordinator
-        )
+        )) ?? WKWebView()
     }
 
     public func updateUIView(_ webView: WKWebView, context: Context) {}
@@ -35,11 +35,11 @@ public final class ApproovWebViewController: UIViewController {
     private let content: ApproovWebViewContent
     private let configuration: ApproovWebViewConfiguration
     private lazy var coordinator = ApproovWebViewCoordinator(configuration: configuration)
-    private lazy var webView = ApproovWebViewFactory.makeWebView(
+    private lazy var webView = (try? ApproovWebViewFactory.makeWebView(
         content: content,
         configuration: configuration,
         coordinator: coordinator
-    )
+    )) ?? WKWebView()
 
     public init(
         content: ApproovWebViewContent,

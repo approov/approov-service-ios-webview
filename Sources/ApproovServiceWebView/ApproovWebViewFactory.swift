@@ -17,6 +17,12 @@ private final class ApproovWebViewInstallation: NSObject {
     }
 }
 
+/// Errors reported when a bridge cannot be installed safely.
+public enum ApproovWebViewInstallationError: Error, Equatable {
+    case alreadyInstalled
+    case javaScriptDisabled
+}
+
 /// Public entry point for creating or installing an Approov-protected WebView.
 ///
 /// Use this type when the convenience SwiftUI and UIKit hosts are too
@@ -39,16 +45,15 @@ public enum ApproovWebViewFactory {
     ///   protected page load, or reload the page after installation. The bridge
     ///   uses a `WKUserScript` with `.atDocumentStart`, so it cannot retrofit a
     ///   page that has already finished loading.
-    /// - Important: Reinstallation on the same `WKWebView` is treated as a
-    ///   no-op unless the bridge configuration matches exactly. To change the
-    ///   bridge configuration, create a fresh `WKWebView`.
+    /// - Important: A WebView can only be installed once. Create a fresh view
+    ///   to change its configuration.
     @MainActor
     public static func makeWebView(
         content: ApproovWebViewContent? = nil,
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator? = nil,
         baseWebView: WKWebView? = nil
-    ) -> WKWebView {
+    ) throws -> WKWebView {
         let logger = ApproovWebViewLogger(configuration: configuration)
         let coordinator = coordinator ?? makeCoordinator(configuration: configuration)
         let webView = baseWebView ?? makeBaseWebView()
@@ -59,7 +64,7 @@ public enum ApproovWebViewFactory {
             """
         )
 
-        installBridgeIfNeeded(
+        try installBridgeIfNeeded(
             on: webView,
             configuration: configuration,
             coordinator: coordinator
@@ -87,12 +92,12 @@ public enum ApproovWebViewFactory {
         on webView: WKWebView,
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator? = nil
-    ) -> WKWebView {
+    ) throws -> WKWebView {
         let logger = ApproovWebViewLogger(configuration: configuration)
         let coordinator = coordinator ?? makeCoordinator(configuration: configuration)
         logger.debug("Installing Approov bridge on existing WKWebView")
 
-        installBridgeIfNeeded(
+        try installBridgeIfNeeded(
             on: webView,
             configuration: configuration,
             coordinator: coordinator
@@ -122,7 +127,7 @@ public enum ApproovWebViewFactory {
         on webView: WKWebView,
         configuration: ApproovWebViewConfiguration,
         coordinator: ApproovWebViewCoordinator
-    ) {
+    ) throws {
         let logger = ApproovWebViewLogger(configuration: configuration)
         let bridgeScriptSource =
             ApproovServiceWebViewCore.ApproovWebViewJavaScriptBridge.scriptSource(
@@ -131,26 +136,12 @@ public enum ApproovWebViewFactory {
                 xhrBridgeEnabled: configuration.interceptXMLHttpRequests
             )
 
-        if let installation = installation(for: webView) {
-            logger.debug("Approov bridge already installed on this WKWebView; reusing existing installation")
-            assert(
-                installation.bridgeScriptSource == bridgeScriptSource,
-                """
-                ApproovWebViewFactory does not support reconfiguring an already-installed WKWebView.
-                Create a fresh WKWebView to change bridge script configuration such as the
-                handler name, protected endpoints, or XHR interception setting.
-                """
-            )
-            installation.coordinator.attach(webView: webView)
-            return
+        guard installation(for: webView) == nil else {
+            throw ApproovWebViewInstallationError.alreadyInstalled
         }
-
-        assert(
-            webView.configuration.defaultWebpagePreferences.allowsContentJavaScript,
-            """
-            ApproovWebViewFactory.install(on:) requires a base WKWebView with content JavaScript enabled.
-            """
-        )
+        guard webView.configuration.defaultWebpagePreferences.allowsContentJavaScript else {
+            throw ApproovWebViewInstallationError.javaScriptDisabled
+        }
 
         let userContentController = webView.configuration.userContentController
         logger.debug(
