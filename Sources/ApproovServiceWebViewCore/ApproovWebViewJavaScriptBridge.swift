@@ -804,12 +804,13 @@ package enum ApproovWebViewJavaScriptBridge {
           xhr.dispatchEvent(makeXHREvent("loadend"));
         };
 
-        xhr.send = async (body = null) => {
+        xhr.send = (body = null) => {
           if (!protectedState.active) {
             nativeSend(body);
             return;
           }
 
+          void (async () => {
           try {
             const nativeResponse = await nativeHandler.postMessage({
               url: protectedState.url,
@@ -850,6 +851,7 @@ package enum ApproovWebViewJavaScriptBridge {
             xhr.dispatchEvent(makeXHREvent("error", error));
             xhr.dispatchEvent(makeXHREvent("loadend"));
           }
+          })();
         };
 
         return xhr;

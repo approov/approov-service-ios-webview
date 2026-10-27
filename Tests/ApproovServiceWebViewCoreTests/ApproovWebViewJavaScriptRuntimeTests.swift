@@ -190,4 +190,14 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRSendReturnsUndefined() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); xhr.open('GET', 'https://api.example.com/');
+            const done = new Promise(resolve => xhr.onloadend = resolve);
+            const result = xhr.send(); await done; return result === undefined;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
