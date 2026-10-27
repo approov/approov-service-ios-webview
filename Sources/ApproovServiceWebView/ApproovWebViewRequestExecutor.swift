@@ -148,8 +148,16 @@ final actor ApproovWebViewRequestExecutor {
         var redirectCount = 0
 
         while true {
+            let tokenHeader = ApproovService.getApproovTokenHeader()
+            var signedRequest = try ApproovWebViewTokenPolicy.sign(
+                currentRequest, header: tokenHeader,
+                prefix: configuration.approovTokenHeaderPrefix,
+                allowMissing: configuration.allowRequestsWithoutApproovToken,
+                signer: { try ApproovService.signRequest($0) }
+            )
+            ApproovWebViewServiceMutator.markAlreadySigned(&signedRequest)
             let (data, response, proposedRedirect) =
-                try await performPinnedRequest(currentRequest)
+                try await performPinnedRequest(signedRequest)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw ApproovWebViewBridgeError.nonHTTPResponse
             }

@@ -17,6 +17,13 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
     }
 
     private static let requestScopeProperty = "ApproovWebViewBridge.ScopeID"
+    private static let signedRequestProperty = "ApproovWebViewBridge.AlreadySigned"
+
+    static func markAlreadySigned(_ request: inout URLRequest) {
+        let mutable = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
+        URLProtocol.setProperty(true, forKey: signedRequestProperty, in: mutable)
+        request = mutable as URLRequest
+    }
     private static let stateQueue = DispatchQueue(
         label: "ApproovWebViewServiceMutator.state",
         qos: .userInitiated
@@ -155,6 +162,9 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
     }
 
     func handleInterceptorShouldProcessRequest(_ request: URLRequest) throws -> Bool {
+        if URLProtocol.property(forKey: Self.signedRequestProperty, in: request) as? Bool == true {
+            return false
+        }
         if let scopePolicy = Self.scopePolicy(for: request) {
             guard isAllowedWebViewRequest(request, policy: scopePolicy) else {
                 Self.debugLog(
