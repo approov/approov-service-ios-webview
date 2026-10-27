@@ -143,6 +143,13 @@ package enum ApproovWebViewJavaScriptBridge {
           sourcePageURL: window.location.href,
           responseHandling,
           requestSource,
+          credentials: request.credentials,
+          mode: request.mode,
+          redirect: request.redirect,
+          cache: request.cache,
+          integrity: request.integrity,
+          referrer: request.referrer,
+          referrerPolicy: request.referrerPolicy,
         };
       };
 
@@ -413,6 +420,10 @@ package enum ApproovWebViewJavaScriptBridge {
           return originalFetch(input, init);
         }
 
+        if (request.mode === "no-cors" || request.redirect === "manual" || request.integrity ||
+            (typeof ReadableStream !== "undefined" && init?.body instanceof ReadableStream)) {
+          throw new TypeError("This protected fetch option is not supported");
+        }
         const payload = await serializeRequest(
           request,
           "fetch",
