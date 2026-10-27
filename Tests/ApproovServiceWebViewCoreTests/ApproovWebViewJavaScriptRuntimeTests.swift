@@ -88,6 +88,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                     xhrBridgeEnabled: true, maxRequestBodyBytes: maxRequestBodyBytes,
                     formBridgeEnabled: formBridgeEnabled), injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         try await load(view)
@@ -156,6 +157,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             controller.addUserScript(
                 WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
             let configuration = WKWebViewConfiguration()
+            configuration.websiteDataStore = .nonPersistent()
             configuration.userContentController = controller
             let view = WKWebView(frame: .zero, configuration: configuration)
             try await load(view)
@@ -174,6 +176,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             xhrBridgeEnabled: true)
         controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         try await load(view)
@@ -199,6 +202,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                     handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
                     xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         try await load(view)
@@ -225,6 +229,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                     handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
                     xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         try await load(view)
@@ -248,6 +253,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                     handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
                     xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         try await load(view)
@@ -272,6 +278,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                     handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
                     xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         try await load(view)
@@ -294,6 +301,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                     handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
                     xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         try await load(view)
