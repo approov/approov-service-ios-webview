@@ -81,8 +81,9 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         }
         await fulfillment(of: [leaseReleased], timeout: 5)
         XCTAssertNil(lease.value)
-        XCTAssertNil((releasedCoordinator.value as? ApproovWebViewCoordinator)?.storeLifetimeOwner,
-                     "Closing the old view must release the coordinator's own lease")
+        XCTAssertNil(
+            (releasedCoordinator.value as? ApproovWebViewCoordinator)?.storeLifetimeOwner,
+            "Closing the old view must release the coordinator's own lease")
 
         try ApproovWebViewFactory.install(on: replacement, configuration: configuration)
         XCTAssertEqual(replacement.configuration.userContentController.userScripts.count, 1)
