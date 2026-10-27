@@ -204,6 +204,43 @@ final class ApproovWebViewCoordinatorTests: XCTestCase {
     }).catch(function (error) { window.webkit.messageHandlers.fixtureResult.postMessage(String(error)); });
     """
 
+    func testFailureMessagesDoNotExposeSensitiveURLDetails() {
+        let sensitive = "https://sensitive-user:sensitive-password@api.example.com/private?token=sensitive-query#sensitive-fragment"
+        let errors: [Error] = [
+            ApproovWebViewBridgeError.invalidURL(sensitive),
+            ApproovWebViewBridgeError.unsupportedScheme(sensitive),
+            ApproovWebViewBridgeError.requestNotProtected(sensitive),
+            NSError(domain: "Fixture", code: 1, userInfo: [NSLocalizedDescriptionKey: sensitive])
+        ]
+        for error in errors {
+            let message = ApproovWebViewCoordinator.safeErrorMessage(error)
+            XCTAssertFalse(message.contains("sensitive"))
+            XCTAssertFalse(message.contains("api.example.com"))
+            XCTAssertFalse(message.contains("private"))
+        }
+        XCTAssertTrue(ApproovWebViewCoordinator.safeErrorMessage(URLError(.cancelled)).contains("cancelled"))
+    }
+
+    func testPageReceivesFixedMessageForArbitraryNativeFailure() async throws {
+        let reported = expectation(description: "safe page failure")
+        let configuration = makeConfiguration()
+        let coordinator = ApproovWebViewCoordinator(configuration: configuration) { _, _ in
+            throw NSError(domain: "Fixture", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "https://sensitive-user:sensitive-password@api.example.com?token=sensitive-query#sensitive-fragment"])
+        }
+        let view = try ApproovWebViewFactory.makeWebView(configuration: configuration, coordinator: coordinator)
+        let resultHandler = FixtureMessageHandler { message in
+            let text = message.body as? String ?? ""
+            XCTAssertTrue(text.contains("The protected request failed."))
+            XCTAssertFalse(text.contains("sensitive"))
+            reported.fulfill()
+        }
+        view.configuration.userContentController.add(resultHandler, name: "fixtureResult")
+        view.loadHTMLString("<script>" + Self.pendingRequestScript + "</script>", baseURL: URL(string: "https://app.example.com/main"))
+        await fulfillment(of: [reported], timeout: 5)
+        withExtendedLifetime(view) {}
+    }
+
     private func makeConfiguration() -> ApproovWebViewConfiguration {
         ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: ["https://app.example.com"])
     }

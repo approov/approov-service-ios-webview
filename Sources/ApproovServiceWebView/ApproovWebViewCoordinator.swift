@@ -14,7 +14,6 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
     var canAttachWebView: Bool { !hasAttachedWebView }
     private var executor: ApproovWebViewRequestExecutor?
-    private var executorInitializationError: Error?
     private var didWarnAboutMissingOriginAllowlist = false
     typealias Execution = (ApproovWebViewProxyRequest, ApproovWebViewRequestContext) async throws -> ApproovWebViewExecutionResult
     private var executionOverride: Execution?
@@ -73,12 +72,10 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                     store: webView.configuration.websiteDataStore.httpCookieStore
                 )
             )
-            self.executorInitializationError = nil
         } catch {
             self.executor = nil
-            self.executorInitializationError = error
             logger.error(
-                "Failed to initialize the native request executor: \(error.localizedDescription)"
+                "Failed to initialize the native request executor."
             )
         }
     }
@@ -146,8 +143,8 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
             }
             start(request, context: context, key: key, replyHandler: replyHandler)
         } catch {
-            logger.error("Failed to decode the WebView bridge payload: \(error.localizedDescription)")
-            replyHandler(nil, "Failed to decode the WebView request: \(error.localizedDescription)")
+            logger.error("Failed to decode the WebView bridge payload.")
+            replyHandler(nil, "The WebView request payload was not valid.")
         }
     }
 
@@ -173,6 +170,27 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         pending.task.cancel()
         pending.replyHandler(nil, Self.cancelledMessage)
         return true
+    }
+
+    /// Error descriptions from SDKs, URLSession, and host callbacks can contain
+    /// complete URLs or request data. Only fixed bridge messages reach logs or JS.
+    static func safeErrorMessage(_ error: Error) -> String {
+        let nativeError = error as NSError
+        if error is CancellationError ||
+            (nativeError.domain == NSURLErrorDomain && nativeError.code == NSURLErrorCancelled) {
+            return cancelledMessage
+        }
+        guard let bridgeError = error as? ApproovWebViewBridgeError else {
+            return "The protected request failed."
+        }
+        switch bridgeError {
+        case .invalidURL: return "The WebView requested an invalid URL."
+        case .unsupportedScheme: return "The WebView requested an unsupported URL scheme."
+        case .requestNotProtected: return "This request is outside the protected endpoints."
+        case .invalidRequestBody: return "The WebView request body was not valid."
+        case .webViewUnavailable: return "The native bridge has closed."
+        default: return "The protected request failed."
+        }
     }
 
     private static let cancelledMessage = "The protected request was cancelled."
@@ -214,13 +232,13 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                         pending.replyHandler(["navigationStarted": true], nil)
                     }
                 } catch {
-                    self.logger.error("WebView bridge request failed: \(error.localizedDescription)")
-                    pending.replyHandler(nil, error.localizedDescription)
+                    self.logger.error("WebView bridge request failed: \(Self.safeErrorMessage(error))")
+                    pending.replyHandler(nil, Self.safeErrorMessage(error))
                 }
             } catch {
                 guard let self, let pending = self.takeRequest(key, token: token) else { return }
-                self.logger.error("WebView bridge request failed: \(error.localizedDescription)")
-                pending.replyHandler(nil, error.localizedDescription)
+                self.logger.error("WebView bridge request failed: \(Self.safeErrorMessage(error))")
+                pending.replyHandler(nil, Self.safeErrorMessage(error))
             }
         }
         pendingRequests[key] = PendingRequest(token: token, task: task, replyHandler: replyHandler)
@@ -317,7 +335,8 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         let event = bodyDictionary["event"] as? String ?? "unknown"
         switch event {
         case "unprotected-request-bypass":
-            let requestSource = (bodyDictionary["requestSource"] as? String ?? "unknown").uppercased()
+            let suppliedSource = bodyDictionary["requestSource"] as? String ?? ""
+            let requestSource = ["fetch", "xhr", "form"].contains(suppliedSource) ? suppliedSource.uppercased() : "UNKNOWN"
             let url = bodyDictionary["url"] as? String ?? "<missing-url>"
             logger.debug(
                 """
@@ -326,7 +345,7 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                 """
             )
         default:
-            logger.debug("Received WebView bridge diagnostic event '\(event)'")
+            logger.debug("Received an unknown WebView bridge diagnostic event")
         }
 
         replyHandler(["logged": true], nil)
