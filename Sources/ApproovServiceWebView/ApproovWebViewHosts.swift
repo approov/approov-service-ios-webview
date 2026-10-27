@@ -20,7 +20,7 @@ public final class ApproovWebViewContainer: UIView {
         webView = nil
         currentContent = nil
         currentConfigurationID = nil
-        subviews.forEach { $0.removeFromSuperview() }
+        for subview in subviews { subview.removeFromSuperview() }
         do {
             let view = try ApproovWebViewFactory.makeWebView(content: content, configuration: configuration)
             view.frame = bounds

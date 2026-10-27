@@ -186,7 +186,7 @@ private final class LoopbackServer: @unchecked Sendable {
     func stop() {
         listener.cancel()
         queue.async { [self] in
-            connections.forEach { $0.cancel() }
+            for connection in connections { connection.cancel() }
             connections.removeAll()
         }
     }
