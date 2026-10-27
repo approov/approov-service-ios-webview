@@ -149,7 +149,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let view = WKWebView(frame: .zero, configuration: configuration)
         await load(view)
         let result = try await view.callAsyncJavaScript("""
-            for (const options of [{mode:'no-cors'}, {redirect:'manual'}, {integrity:'sha256-AAAA'}]) {
+            for (const options of [{mode:'no-cors'}, {redirect:'manual'}, {integrity:'sha256-AAAA'}, {cache:'reload'}, {cache:'no-cache'}, {cache:'force-cache'}]) {
                 try { await fetch('https://api.example.com/', options); return false; }
                 catch (error) { if (!(error instanceof TypeError)) return false; }
             }

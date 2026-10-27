@@ -520,6 +520,7 @@ package enum ApproovWebViewJavaScriptBridge {
         if (request.bodyUsed) throw new TypeError("Request body has already been consumed");
 
         if (request.mode === "no-cors" || request.redirect === "manual" || request.integrity ||
+            !["default", "no-store"].includes(request.cache) ||
             (typeof ReadableStream !== "undefined" && init?.body instanceof ReadableStream)) {
           throw new TypeError("This protected fetch option is not supported");
         }
