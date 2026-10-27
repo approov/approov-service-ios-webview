@@ -7,14 +7,14 @@ Some tasks define explicit unsupported behavior instead of full browser parity.
 ## Simulator results
 
 The complete suite passed on October 27, 2026, with Xcode 27.1 (27A9275).
-The tested implementation is commit `f5f871b`.
-The iOS 27 run preceded the final equivalent `forEach` to `for` formatting change.
-The iOS 18.6 run includes that change.
+The iOS 27 run also passed on a newly created simulator after the cold-start fixture correction.
+That correction gives WebKit document startup a 30-second bound and stops before JavaScript after a failed load.
+It does not change library behavior or the test assertions.
 
-| Simulator | Passed | Failed | Skipped |
-| --- | ---: | ---: | ---: |
-| iPhone 18 Pro, iOS 27.0 (24A434) | 195 | 0 | 0 |
-| iPhone 16 Pro, iOS 18.6 (22G86) | 195 | 0 | 0 |
+| Simulator | Tested revision | Passed | Failed | Skipped |
+| --- | --- | ---: | ---: | ---: |
+| Fresh iPhone 18 Pro, iOS 27.0 (24A434) | `276e039` | 195 | 0 | 0 |
+| iPhone 16 Pro, iOS 18.6 (22G86) | `f5f871b` | 195 | 0 | 0 |
 
 Each run includes 98 service tests and 97 core tests.
 The JavaScript runtime class contains 43 tests in real WKWebViews.
