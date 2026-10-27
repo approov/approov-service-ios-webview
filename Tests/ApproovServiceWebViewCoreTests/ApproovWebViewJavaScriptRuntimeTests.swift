@@ -497,6 +497,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
     func testInlineAndPropagationCancellationPreventsNativeSubmission() async throws {
         let view = await fixture()
         let result = try await view.callAsyncJavaScript("""
+            const outcomes = [];
             for (const mode of ['inline','window-inline','stopped-inline','capture','bubble']) {
                 document.body.innerHTML = '<form action="https://api.example.com/echo"></form>';
                 const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
@@ -507,11 +508,11 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                 if (mode === 'capture') form.addEventListener('submit', event => event.preventDefault(), true);
                 if (mode === 'bubble') form.addEventListener('submit', event => event.preventDefault());
                 form.requestSubmit(); await new Promise(resolve => setTimeout(resolve, 20));
-                window.onsubmit = null; if (responses) return false;
+                window.onsubmit = null; outcomes.push(`${mode}:${responses}`);
             }
-            return true;
+            return outcomes;
             """, arguments: [:], in: nil, contentWorld: .page)
-        XCTAssertEqual(result as? Bool, true)
+        XCTAssertEqual(result as? [String], ["inline:0", "window-inline:0", "stopped-inline:0", "capture:0", "bubble:0"], "Per-variant cancellation results: \(String(describing: result))")
     }
 
     func testClosedShadowFormsFailClearly() async throws {
