@@ -80,4 +80,22 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testFetchConsumesRequestBody() async throws {
+        let controller = WKUserContentController()
+        let reply = Reply()
+        controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
+        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController = controller
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let result = try await view.callAsyncJavaScript("""
+            const request = new Request('https://api.example.com/', {method:'POST', body:'body'});
+            await fetch(request);
+            return request.bodyUsed;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

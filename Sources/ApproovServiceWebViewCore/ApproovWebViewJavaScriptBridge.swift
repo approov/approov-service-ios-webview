@@ -131,7 +131,7 @@ package enum ApproovWebViewJavaScriptBridge {
 
         let bodyBase64 = null;
         if (request.method !== "GET" && request.method !== "HEAD") {
-          const bodyBuffer = await request.clone().arrayBuffer();
+          const bodyBuffer = await request.arrayBuffer();
           bodyBase64 = bodyBuffer.byteLength === 0 ? null : arrayBufferToBase64(bodyBuffer);
         }
 
