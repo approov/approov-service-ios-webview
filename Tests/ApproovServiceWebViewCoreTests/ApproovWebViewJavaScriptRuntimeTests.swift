@@ -349,4 +349,16 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testAmbiguousProtectedPathsRejectWithoutBrowserFallback() async throws {
+        let view = await fixture(preScript: "window.fetch = async () => new Response('browser');")
+        let result = try await view.callAsyncJavaScript("""
+            for (const path of ['/private%2fpublic','/private%5cpublic','/private/%2e%2e/public','/invalid%zz']) {
+                try { await fetch('https://api.example.com' + path); return false; }
+                catch (error) { if (!(error instanceof TypeError)) return false; }
+            }
+            return (await fetch('https://api.example.com/%65cho')).status === 200;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

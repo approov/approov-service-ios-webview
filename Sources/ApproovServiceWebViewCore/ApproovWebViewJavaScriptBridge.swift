@@ -100,32 +100,35 @@ package enum ApproovWebViewJavaScriptBridge {
           : pathname === normalizedPathPrefix || pathname.startsWith(`${normalizedPathPrefix}/`);
       };
 
-      const isProtectedEndpoint = (urlString) => {
-        try {
-          const resolvedURL = new URL(urlString, window.location.href);
-          if (resolvedURL.protocol !== "http:" && resolvedURL.protocol !== "https:") {
-            return false;
-          }
+      const canonicalPath = (path) => path.replace(/%([0-9a-f]{2})/gi, (_, hex) => {
+        const character = String.fromCharCode(parseInt(hex, 16));
+        return /^[A-Za-z0-9._~-]$/.test(character) ? character : `%${hex.toUpperCase()}`;
+      });
 
-          const hostname = resolvedURL.hostname.toLowerCase();
-          const pathname = resolvedURL.pathname || "/";
-          return protectedEndpoints.some((entry) => {
-            const excludedPathPrefixes = Array.isArray(entry.excludedPathPrefixes)
-              ? entry.excludedPathPrefixes
-              : [];
-            const schemeMatches = resolvedURL.protocol === `${entry.scheme}:`;
-            const hostMatches = hostname === entry.host;
-            const defaultPort = resolvedURL.protocol === "https:" ? 443 : 80;
-            const portMatches = Number(resolvedURL.port || defaultPort) === (entry.port ?? defaultPort);
-            const pathMatches = matchesPathPrefix(pathname, entry.pathPrefix);
-            const pathExcluded = excludedPathPrefixes.some((excludedPathPrefix) =>
-              matchesPathPrefix(pathname, excludedPathPrefix)
-            );
-            return schemeMatches && hostMatches && portMatches && pathMatches && !pathExcluded;
-          });
-        } catch (_error) {
-          return false;
+      const isProtectedEndpoint = (urlString) => {
+        let resolvedURL;
+        try { resolvedURL = new URL(urlString, document.baseURI); } catch (_) { return false; }
+        if (!["http:", "https:"].includes(resolvedURL.protocol)) return false;
+        const defaultPort = resolvedURL.protocol === "https:" ? 443 : 80;
+        const entries = protectedEndpoints.filter(entry => resolvedURL.protocol === `${entry.scheme}:` &&
+          resolvedURL.hostname.toLowerCase() === entry.host &&
+          Number(resolvedURL.port || defaultPort) === (entry.port ?? defaultPort));
+        if (!entries.length) return false;
+        // URL parsing removes dot segments. Inspect the original spelling too,
+        // so encoded separators/dot segments cannot escape a protected rule.
+        const rawPath = String(urlString).split(/[?#]/, 1)[0]
+          .replace(/^(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/[^/\\]*/, "");
+        const ambiguous = path => /%(?![0-9a-f]{2})|%2f|%5c|\\/i.test(path) ||
+          path.split("/").some(segment => segment.includes("%") && [".", ".."].includes(canonicalPath(segment)));
+        if (ambiguous(rawPath) || ambiguous(resolvedURL.pathname)) {
+          throw new TypeError("Ambiguous protected URL path is not supported");
         }
+        const pathname = canonicalPath(resolvedURL.pathname || "/");
+        return entries.some(entry => {
+          const excludedPathPrefixes = Array.isArray(entry.excludedPathPrefixes) ? entry.excludedPathPrefixes : [];
+          return matchesPathPrefix(pathname, canonicalPath(entry.pathPrefix || "/")) &&
+            !excludedPathPrefixes.some(excludedPathPrefix => matchesPathPrefix(pathname, canonicalPath(excludedPathPrefix)));
+        });
       };
 
       // The bridge supports finite, buffered bodies. Stop reading as soon as
@@ -257,6 +260,7 @@ package enum ApproovWebViewJavaScriptBridge {
           || form.getAttribute("action")
           || window.location.href;
 
+        isProtectedEndpoint(rawAction); // Reject ambiguous spelling before URL normalization.
         return new URL(rawAction, document.baseURI).toString();
       };
 
@@ -447,14 +451,13 @@ package enum ApproovWebViewJavaScriptBridge {
       let nextRequestID = 0;
       const allocateRequestID = () => `${Date.now()}-${++nextRequestID}-${Math.random().toString(36).slice(2)}`;
       window.fetch = async (input, init) => {
-        const request = input instanceof Request && init === undefined
-          ? input
-          : new Request(input, init);
-
-        if (!isProtectedEndpoint(request.url)) {
-          logUnprotectedRequestBypass("fetch", request.url);
+        const inputURL = input instanceof Request ? input.url : String(input);
+        if (!isProtectedEndpoint(inputURL)) {
+          const bypassURL = new URL(inputURL, document.baseURI).toString();
+          logUnprotectedRequestBypass("fetch", bypassURL);
           return originalFetch(input, init);
         }
+        const request = input instanceof Request && init === undefined ? input : new Request(input, init);
 
         if (request.mode === "no-cors" || request.redirect === "manual" || request.integrity ||
             (typeof ReadableStream !== "undefined" && init?.body instanceof ReadableStream)) {
@@ -781,8 +784,10 @@ package enum ApproovWebViewJavaScriptBridge {
         };
 
         xhr.open = (method, url, async = true, user = null, password = null) => {
-          const resolvedURL = new URL(url, document.baseURI).toString();
-          const protectedURL = isProtectedEndpoint(resolvedURL);
+          const protectedURL = isProtectedEndpoint(url);
+          let resolvedURL;
+          try { resolvedURL = new URL(url, document.baseURI).toString(); }
+          catch (_) { return nativeOpen(method, url, async, user, password); }
           let validator = null;
           if (protectedURL) {
             // Let WebKit perform Web IDL, token and forbidden-method validation
