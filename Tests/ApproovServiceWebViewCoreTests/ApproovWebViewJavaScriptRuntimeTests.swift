@@ -21,9 +21,12 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         view.navigationDelegate = nil
     }
 
-    private func fixture(maxRequestBodyBytes: Int = 10 * 1024 * 1024) async -> WKWebView {
+    private func fixture(maxRequestBodyBytes: Int = 10 * 1024 * 1024, preScript: String = "") async -> WKWebView {
         let controller = WKUserContentController()
         controller.addScriptMessageHandler(Reply(), contentWorld: .page, name: "bridge")
+        if !preScript.isEmpty {
+            controller.addUserScript(WKUserScript(source: preScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
         controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(
             handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
             xhrBridgeEnabled: true, maxRequestBodyBytes: maxRequestBodyBytes), injectionTime: .atDocumentStart, forMainFrameOnly: false))
@@ -332,6 +335,16 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             const xhr = new XMLHttpRequest(); xhr.open('GET','echo');
             const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
             return JSON.parse(xhr.responseText).url === 'https://api.example.com/relative/echo';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testDefaultPortRuleDoesNotCaptureOtherPorts() async throws {
+        let view = await fixture(preScript: "window.fetch = async () => new Response('browser');")
+        let result = try await view.callAsyncJavaScript("""
+            const native = await fetch('https://api.example.com:443/');
+            const browser = await fetch('https://api.example.com:8443/');
+            return await native.text() === '{}' && await browser.text() === 'browser';
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }

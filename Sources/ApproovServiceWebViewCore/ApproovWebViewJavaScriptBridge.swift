@@ -115,11 +115,13 @@ package enum ApproovWebViewJavaScriptBridge {
               : [];
             const schemeMatches = resolvedURL.protocol === `${entry.scheme}:`;
             const hostMatches = hostname === entry.host;
+            const defaultPort = resolvedURL.protocol === "https:" ? 443 : 80;
+            const portMatches = Number(resolvedURL.port || defaultPort) === (entry.port ?? defaultPort);
             const pathMatches = matchesPathPrefix(pathname, entry.pathPrefix);
             const pathExcluded = excludedPathPrefixes.some((excludedPathPrefix) =>
               matchesPathPrefix(pathname, excludedPathPrefix)
             );
-            return schemeMatches && hostMatches && pathMatches && !pathExcluded;
+            return schemeMatches && hostMatches && portMatches && pathMatches && !pathExcluded;
           });
         } catch (_error) {
           return false;
