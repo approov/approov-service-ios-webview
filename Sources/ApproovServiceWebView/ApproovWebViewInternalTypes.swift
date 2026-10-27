@@ -25,6 +25,22 @@ struct ApproovWebViewProxyRequest: Decodable {
     let sourcePageURL: String?
     let responseHandling: ApproovWebViewResponseHandling
     let requestSource: ApproovWebViewRequestSource
+    let requestId: String?
+    let credentials: String?
+    let mode: String?
+    let redirect: String?
+    let cache: String?
+    let integrity: String?
+    let referrer: String?
+    let referrerPolicy: String?
+}
+
+/// Trusted context comes from WKFrameInfo, never from the message body.
+struct ApproovWebViewRequestContext: Sendable {
+    let frameURL: URL
+    let frameOrigin: String
+    let mainDocumentURL: URL?
+    let isMainFrame: Bool
 }
 
 /// Shape of the response payload sent back into JavaScript.
@@ -34,6 +50,8 @@ struct ApproovWebViewProxyResponse: Encodable {
     let statusText: String
     let headers: [String: String]
     let bodyBase64: String
+    var redirected = false
+    var type = "basic"
 }
 
 /// Native response payload used to render a WebView navigation.

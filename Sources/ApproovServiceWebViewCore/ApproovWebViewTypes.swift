@@ -17,6 +17,8 @@ public enum ApproovWebViewContent {
 public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
     public let scheme: String
     public let host: String
+    /// Nil selects the standard port for the scheme, not every port.
+    public let port: Int?
     public let pathPrefix: String
     public let excludedPathPrefixes: [String]
 
@@ -24,10 +26,12 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
         scheme: String = "https",
         host: String,
         pathPrefix: String,
-        excludedPathPrefixes: [String] = []
+        excludedPathPrefixes: [String] = [],
+        port: Int? = nil
     ) {
         self.scheme = scheme.lowercased()
         self.host = host.lowercased()
+        self.port = port
         self.pathPrefix = Self.normalizePathPrefix(pathPrefix)
         self.excludedPathPrefixes = excludedPathPrefixes
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -39,7 +43,8 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
         guard let urlScheme = url.scheme?.lowercased(),
               let urlHost = url.host?.lowercased(),
               urlScheme == scheme,
-              urlHost == host else {
+              urlHost == host,
+              (url.port ?? Self.defaultPort(for: urlScheme)) == effectivePort else {
             return false
         }
 
@@ -51,6 +56,12 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
         return !excludedPathPrefixes.contains { excludedPathPrefix in
             Self.pathMatches(urlPath, pathPrefix: excludedPathPrefix)
         }
+    }
+
+    public var effectivePort: Int? { port ?? Self.defaultPort(for: scheme) }
+
+    private static func defaultPort(for scheme: String) -> Int? {
+        scheme == "https" ? 443 : scheme == "http" ? 80 : nil
     }
 
     private static func normalizePathPrefix(_ pathPrefix: String) -> String {
@@ -77,6 +88,9 @@ public struct ApproovWebViewProtectedEndpoint: Sendable, Encodable {
 /// behavior should be driven through these properties instead of editing the
 /// bridge internals.
 public struct ApproovWebViewConfiguration: Sendable {
+    /// Copies of one configuration retain identity. New configurations require
+    /// a fresh installation, even when their visible scalar values match.
+    public let installationID = UUID()
     /// Your Approov onboarding string.
     public let approovConfig: String
 
@@ -125,6 +139,15 @@ public struct ApproovWebViewConfiguration: Sendable {
     /// behavior and only needs Approov interception for `fetch` or forms.
     public let interceptXMLHttpRequests: Bool
 
+    public let interceptForms: Bool
+    public let maximumRequestBodyBytes: Int
+    public let maximumResponseBodyBytes: Int
+    public let maximumConcurrentRequests: Int
+
+    /// The host initializes and configures ApproovURLSession itself in this mode.
+    /// The bridge composes its scope policy without resetting shared service state.
+    public let usesExistingApproovService: Bool
+
     /// Gives the host app one place to run one-time Approov setup.
     ///
     /// Typical uses include setting a development key or enabling additional
@@ -156,6 +179,11 @@ public struct ApproovWebViewConfiguration: Sendable {
         approovDevelopmentKey: String? = nil,
         allowRequestsWithoutApproovToken: Bool = false,
         interceptXMLHttpRequests: Bool = true,
+        interceptForms: Bool = true,
+        maximumRequestBodyBytes: Int = 10 * 1024 * 1024,
+        maximumResponseBodyBytes: Int = 10 * 1024 * 1024,
+        maximumConcurrentRequests: Int = 16,
+        usesExistingApproovService: Bool = false,
         configureApproovService: @escaping @Sendable () throws -> Void = {},
         mutateRequest: @escaping @Sendable (URLRequest) -> URLRequest = { $0 },
         debugLoggingEnabled: Bool = true,
@@ -171,6 +199,11 @@ public struct ApproovWebViewConfiguration: Sendable {
         self.approovDevelopmentKey = approovDevelopmentKey
         self.allowRequestsWithoutApproovToken = allowRequestsWithoutApproovToken
         self.interceptXMLHttpRequests = interceptXMLHttpRequests
+        self.interceptForms = interceptForms
+        self.maximumRequestBodyBytes = maximumRequestBodyBytes
+        self.maximumResponseBodyBytes = maximumResponseBodyBytes
+        self.maximumConcurrentRequests = maximumConcurrentRequests
+        self.usesExistingApproovService = usesExistingApproovService
         self.configureApproovService = configureApproovService
         self.mutateRequest = mutateRequest
         self.debugLoggingEnabled = debugLoggingEnabled
