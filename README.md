@@ -7,6 +7,8 @@ The package injects a JavaScript bridge into the page, intercepts protected `fet
 > [!IMPORTANT]
 > Only endpoints declared in `protectedEndpoints` are proxied through native networking and protected by Approov.
 
+For an existing integration, see [migration to 0.6](Documentation/MigratingTo0.6.md).
+
 ## Requirements
 
 | Item | Value |
