@@ -692,12 +692,14 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             const protectedEmpty = await lifecycle(XMLHttpRequest, 'https://api.example.com/empty', false);
             const nativeAbort = await lifecycle(window.NativeXHR, 'data:application/json,%7B%7D', true);
             const protectedAbort = await lifecycle(XMLHttpRequest, 'https://api.example.com/?delay=80', true);
-            return native.valid && protectedResult.valid && native.events === protectedResult.events &&
-                nativeEmpty.valid && protectedEmpty.valid && nativeEmpty.events === protectedEmpty.events &&
-                nativeAbort.valid && protectedAbort.valid && nativeAbort.events === protectedAbort.events &&
-                nativeAbort.state === protectedAbort.state;
+            return [['success', native, protectedResult], ['empty', nativeEmpty, protectedEmpty], ['abort', nativeAbort, protectedAbort]]
+                .map(([name, expected, actual]) => ({name, native:expected, protected:actual,
+                    matches:expected.valid && actual.valid && expected.events === actual.events && expected.state === actual.state}));
             """, arguments: [:], in: nil, contentWorld: .page)
-        XCTAssertEqual(result as? Bool, true)
+        let comparisons = try XCTUnwrap(result as? [[String: Any]])
+        for comparison in comparisons {
+            XCTAssertEqual(comparison["matches"] as? Bool, true, "WebKit lifecycle comparison: \(comparison)")
+        }
     }
 
     func testCanonicalConfigurationTrimsPathPrefixAndExclusions() async throws {
@@ -762,7 +764,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             document.body.innerHTML = '<form method="post" action="https://api.example.com/echo"><input name="field" value="before"></form>';
             const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
             form.addEventListener('submit', event => Event.prototype.stopPropagation.call(event), true);
-            form.addEventListener('submit', () => form.querySelector('input').value = 'after');
+            form.addEventListener('submit', () => form.querySelector('input').value = 'after', true);
             const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
             form.requestSubmit(); outcomes.push('stopped:' + atob((await done).bodyBase64));
             const ordinary = new Event('ordinary', {cancelable:true}); Event.prototype.preventDefault.call(ordinary);
@@ -821,15 +823,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let result = try await view.callAsyncJavaScript(
             """
             const form = document.createElement('form'); form.action = 'about:blank'; document.body.append(form);
-            let inlineCalled = false; form.onsubmit = () => { inlineCalled = true; return false; };
+            let inlineCalled = false; let samePhaseMutation = false;
+            form.onsubmit = () => { inlineCalled = true; return false; };
             form.addEventListener('submit', event => window.nativeStopPropagation.call(event), true);
+            form.addEventListener('submit', () => { samePhaseMutation = true; }, true);
             const event = new SubmitEvent('submit', {bubbles:true, cancelable:true});
             const uncancelled = form.dispatchEvent(event);
-            return {inlineCalled, prevented:event.defaultPrevented, uncancelled};
+            return {inlineCalled, samePhaseMutation, prevented:event.defaultPrevented, uncancelled};
             """, arguments: [:], in: nil, contentWorld: .page)
         let outcome = result as? [String: Bool]
         XCTAssertEqual(
-            outcome, ["inlineCalled": false, "prevented": false, "uncancelled": true],
+            outcome, ["inlineCalled": false, "samePhaseMutation": true, "prevented": false, "uncancelled": true],
             "Native target phase outcome: \(String(describing: result))")
     }
 
