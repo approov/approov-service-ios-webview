@@ -19,6 +19,16 @@ package enum ApproovWebViewSitePolicy {
         return sameSite(top, requestURL)
     }
 
+    /// Domain attributes must never target a public suffix, including private rules.
+    /// Fail closed when the bundled list cannot be loaded.
+    package static func isPublicSuffix(_ host: String) -> Bool {
+        guard let rules else { return true }
+        let normalized = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !normalized.isEmpty else { return true }
+        if !normalized.contains(".") { return true }
+        return rules.registrableDomain(normalized) == nil
+    }
+
     package static func sameSite(_ first: URL, _ second: URL) -> Bool {
         guard let firstScheme = first.scheme?.lowercased(), ["http", "https"].contains(firstScheme),
               firstScheme == second.scheme?.lowercased(),

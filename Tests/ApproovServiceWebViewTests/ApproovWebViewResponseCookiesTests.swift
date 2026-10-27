@@ -64,4 +64,36 @@ final class ApproovWebViewResponseCookiesTests: XCTestCase {
 
         XCTAssertTrue(cookies.isEmpty)
     }
+    func testHostPrefixRejectsDomainAttributeWithWhitespaceOrEmptyValue() {
+        for attribute in ["Domain = example.com", "DOMAIN\t=api.example.com", "Domain=", "domain"] {
+            let header = "__Host-id=1; Secure; Path=/; \(attribute)"
+            XCTAssertTrue(ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":header],url:url).isEmpty, header)
+        }
+    }
+    func testMixedCasePrefixesEnforceSecurity() {
+        for header in ["__secure-id=1; Path=/", "__hOsT-id=1; Secure; Path=/; Domain=example.com"] {
+            XCTAssertTrue(ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":header],url:url).isEmpty, header)
+        }
+    }
+    func testHostPrefixDuplicateNamesAreRejected() {
+        let header="__Host-id=1; Secure; Path=/, __Host-id=2; Secure; Path=/"
+        XCTAssertTrue(ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":header],url:url).isEmpty)
+    }
+    func testFoldedExpiresAndHostPrefix() {
+        let header="regular=1; Expires=Wed, 09 Jun 2038 10:18:14 GMT; Path=/, __Host-id=1; Secure; Path=/"
+        let cookies=ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":header],url:url)
+        XCTAssertTrue(cookies.contains { $0.name == "__Host-id" })
+    }
+    func testExpiredDeletionIsPreservedForJar() {
+        let cookies=ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":"gone=; Max-Age=0; Path=/"],url:url)
+        XCTAssertEqual(cookies.count,1)
+        XCTAssertLessThanOrEqual(cookies[0].expiresDate ?? .distantFuture,Date())
+    }
+    func testRejectsICANNAndPrivatePublicSuffixDomains() {
+        for (source,domain) in [("https://shop.example.co.uk/","co.uk"),("https://alice.github.io/","github.io")] {
+            let cookies=ApproovWebViewResponseCookies.cookies(fromResponseHeaders:["Set-Cookie":"bad=1; Domain=\(domain); Path=/"],url:URL(string:source)!)
+            XCTAssertTrue(cookies.isEmpty,domain)
+        }
+    }
+
 }
