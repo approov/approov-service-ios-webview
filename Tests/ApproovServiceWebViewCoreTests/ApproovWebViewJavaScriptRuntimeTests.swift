@@ -420,4 +420,19 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testInvalidFormMethodsUseGET() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            for (const method of ['HEAD', 'PUT', 'invalid']) {
+                document.body.innerHTML = '<form action="https://api.example.com/echo" method="' + method + '"><input name="field" value="value"></form>';
+                const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
+                const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
+                form.requestSubmit(); const payload = await done;
+                if (payload.method !== 'GET' || payload.bodyBase64 !== null) return false;
+            }
+            return true;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

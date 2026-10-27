@@ -256,27 +256,24 @@ package enum ApproovWebViewJavaScriptBridge {
         }));
       };
 
-      const resolveFormAction = (form, submitter) => {
-        const rawAction = submitter?.getAttribute("formaction")
-          || form.getAttribute("action")
-          || window.location.href;
+      const formAttribute = (form, submitter, name, overrideName) =>
+        submitter?.hasAttribute(overrideName) ? submitter.getAttribute(overrideName) : form.getAttribute(name);
 
+      const resolveFormAction = (form, submitter) => {
+        const rawAction = formAttribute(form, submitter, "action", "formaction") || window.location.href;
         isProtectedEndpoint(rawAction); // Reject ambiguous spelling before URL normalization.
         return new URL(rawAction, document.baseURI).toString();
       };
 
       const resolveFormMethod = (form, submitter) => {
-        const rawMethod = submitter?.getAttribute("formmethod")
-          || form.getAttribute("method")
-          || "GET";
-        return rawMethod.toUpperCase();
+        const method = (formAttribute(form, submitter, "method", "formmethod") || "get").toLowerCase();
+        return ["get", "post", "dialog"].includes(method) ? method.toUpperCase() : "GET";
       };
 
       const resolveFormEnctype = (form, submitter) => {
-        const rawEnctype = submitter?.getAttribute("formenctype")
-          || form.getAttribute("enctype")
-          || "application/x-www-form-urlencoded";
-        return rawEnctype.toLowerCase();
+        const type = (formAttribute(form, submitter, "enctype", "formenctype") || "application/x-www-form-urlencoded").toLowerCase();
+        return ["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"].includes(type)
+          ? type : "application/x-www-form-urlencoded";
       };
 
       const resolveFormTarget = (form, submitter) => {
