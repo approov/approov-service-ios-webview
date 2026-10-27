@@ -444,6 +444,11 @@ package enum ApproovWebViewJavaScriptBridge {
           return false;
         }
 
+        const root = form.getRootNode();
+        if (root instanceof ShadowRoot && root.mode === "closed") {
+          throw new DOMException("Protected forms in closed shadow roots are not supported", "NotSupportedError");
+        }
+
         // Current-frame form submission is the production-safe path that can
         // be modeled with `loadSimulatedRequest(...)`.
         const target = resolveFormTarget(form, submitter);
@@ -1074,7 +1079,7 @@ package enum ApproovWebViewJavaScriptBridge {
       });
 
       if (formBridgeEnabled) {
-      document.addEventListener("click", (event) => {
+      const recordSubmitterClick = (event) => {
         const clickedElement = event.target instanceof Element
           ? event.target.closest("button, input")
           : null;
@@ -1090,12 +1095,13 @@ package enum ApproovWebViewJavaScriptBridge {
           imageCoordinates.set(clickedElement, { x: Math.max(0, Math.floor(event.offsetX)), y: Math.max(0, Math.floor(event.offsetY)) });
           setTimeout(() => imageCoordinates.delete(clickedElement), 0);
         }
-      }, true);
+      };
+      document.addEventListener("click", recordSubmitterClick, true);
 
       // Reserve the browser default only after ordinary submit listeners run.
       // A task observes final synchronous mutations; microtasks can run between
       // trusted event listeners and are too early for this purpose.
-      document.addEventListener("submit", (event) => {
+      const handleFormSubmit = (event) => {
         const form = event.target;
         if (!(form instanceof HTMLFormElement) || !event.cancelable) return;
         const submitter = "submitter" in event ? event.submitter : submitterByForm.get(form) || null;
@@ -1103,6 +1109,16 @@ package enum ApproovWebViewJavaScriptBridge {
         let cancelled = event.defaultPrevented;
         let reserved = false;
         let failure = null;
+        const inlineHandlers = event.composedPath().filter(target => target && "onsubmit" in Object(target)).map(target => {
+          const original = target.onsubmit;
+          const wrapped = typeof original === "function" ? function (...args) {
+            const result = original.apply(this, args);
+            if (result === false) cancelled = true;
+            return result;
+          } : original;
+          if (wrapped !== original) target.onsubmit = wrapped;
+          return { target, original, wrapped };
+        });
         const preventDefault = event.preventDefault;
         const stopPropagation = event.stopPropagation;
         const stopImmediatePropagation = event.stopImmediatePropagation;
@@ -1130,9 +1146,18 @@ package enum ApproovWebViewJavaScriptBridge {
           set(value) { if (value === false) cancelled = true; returnValue.set.call(this, value); },
         });
         const finish = candidate => { if (candidate === event) reserve(); };
-        window.addEventListener("submit", finish);
+        const root = form.getRootNode();
+        const finishTarget = root instanceof ShadowRoot ? root : window;
+        finishTarget.addEventListener("submit", finish);
         setTimeout(() => {
-          window.removeEventListener("submit", finish);
+          finishTarget.removeEventListener("submit", finish);
+          for (const { target, original, wrapped } of inlineHandlers) {
+            if (target.onsubmit === wrapped) {
+              if (wrapped !== original) target.onsubmit = original;
+            } else if (reserved && !cancelled) {
+              failure = new DOMException("Replacing inline submit handlers during a protected submission is not supported", "NotSupportedError");
+            }
+          }
           if (cancelled || !reserved) return;
           if (failure) { handleNativeFormError(form, failure); return; }
           try {
@@ -1140,7 +1165,21 @@ package enum ApproovWebViewJavaScriptBridge {
             else submitFormWithNativeDefault(form, submitter);
           } catch (error) { handleNativeFormError(form, error); }
         }, 0);
-      }, true);
+      };
+      document.addEventListener("submit", handleFormSubmit, true);
+      const observedShadowRoots = new WeakSet();
+      const observeShadowRoot = root => {
+        if (!(root instanceof ShadowRoot) || observedShadowRoots.has(root)) return;
+        observedShadowRoots.add(root);
+        root.addEventListener("click", recordSubmitterClick, true);
+        root.addEventListener("submit", handleFormSubmit, true);
+      };
+      const originalAttachShadow = Element.prototype.attachShadow;
+      Element.prototype.attachShadow = function (options) {
+        const root = originalAttachShadow.call(this, options);
+        observeShadowRoot(root);
+        return root;
+      };
 
       const submitFormWithNativeDefault = (form, submitter) => {
         const attributes = ["action", "method", "enctype", "target"];
@@ -1176,6 +1215,7 @@ package enum ApproovWebViewJavaScriptBridge {
       // the subsequent `submit` event sees the correct form overrides.
       if (originalRequestSubmit) {
         HTMLFormElement.prototype.requestSubmit = function (submitter) {
+          observeShadowRoot(this.getRootNode());
           submitterByForm.delete(this);
           if (submitter) submitterByForm.set(this, submitter);
           try { return originalRequestSubmit.call(this, submitter); }

@@ -490,4 +490,36 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testInlineAndPropagationCancellationPreventsNativeSubmission() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            for (const mode of ['inline','window-inline','stopped-inline','capture','bubble']) {
+                document.body.innerHTML = '<form action="https://api.example.com/echo"></form>';
+                const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
+                let responses = 0; form.addEventListener('approov:form-response', () => responses++);
+                if (mode === 'inline' || mode === 'stopped-inline') form.onsubmit = () => false;
+                if (mode === 'window-inline') window.onsubmit = () => false;
+                if (mode === 'stopped-inline') form.addEventListener('submit', event => event.stopPropagation(), true);
+                if (mode === 'capture') form.addEventListener('submit', event => event.preventDefault(), true);
+                if (mode === 'bubble') form.addEventListener('submit', event => event.preventDefault());
+                form.requestSubmit(); await new Promise(resolve => setTimeout(resolve, 20));
+                window.onsubmit = null; if (responses) return false;
+            }
+            return true;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testClosedShadowFormsFailClearly() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const host = document.createElement('div'); document.body.append(host);
+            const root = host.attachShadow({mode:'closed'}); root.innerHTML = '<form action="https://api.example.com/echo"></form>';
+            const form = root.querySelector('form'); form.dataset.approovSubmitMode = 'response';
+            const failed = new Promise(resolve => form.addEventListener('approov:form-error', event => resolve(event.detail.message), {once:true}));
+            form.requestSubmit(); return (await failed).includes('closed shadow');
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
