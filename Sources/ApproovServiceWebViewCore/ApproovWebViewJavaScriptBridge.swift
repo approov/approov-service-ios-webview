@@ -333,7 +333,7 @@ package enum ApproovWebViewJavaScriptBridge {
         let body = null;
 
         if (method === "GET" || method === "HEAD") {
-          const query = new URLSearchParams(requestURL.search);
+          const query = new URLSearchParams();
           formData.forEach((value, name) => {
             appendFormValueToSearchParams(query, name, value);
           });

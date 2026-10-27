@@ -380,4 +380,15 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testGETFormReplacesActionQuery() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            document.body.innerHTML = '<form action="https://api.example.com/echo?old=1"><input name="field" value="value"></form>';
+            const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
+            const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
+            form.requestSubmit(); return (await done).url === 'https://api.example.com/echo?field=value';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
