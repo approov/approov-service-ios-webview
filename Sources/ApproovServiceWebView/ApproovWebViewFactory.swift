@@ -4,6 +4,11 @@ import ObjectiveC
 import UIKit
 import WebKit
 
+private final class ApproovWebViewStoreOwner: NSObject {
+    weak var webView: WKWebView?
+    init(webView: WKWebView) { self.webView = webView }
+}
+
 private final class ApproovWebViewInstallation: NSObject {
     let bridgeScriptSource: String
     let coordinator: ApproovWebViewCoordinator
@@ -23,6 +28,7 @@ public enum ApproovWebViewInstallationError: Error, Equatable {
     case javaScriptDisabled
     case contentControllerAlreadyInstalled
     case coordinatorAlreadyAttached
+    case dataStoreAlreadyInUse
 }
 
 /// Public entry point for creating or installing an Approov-protected WebView.
@@ -32,6 +38,7 @@ public enum ApproovWebViewInstallationError: Error, Equatable {
 public enum ApproovWebViewFactory {
     private static var installationAssociationKey: UInt8 = 0
     private static var controllerAssociationKey: UInt8 = 0
+    private static var storeAssociationKey: UInt8 = 0
 
     /// Creates a reusable coordinator for a custom host integration.
     @MainActor
@@ -115,7 +122,7 @@ public enum ApproovWebViewFactory {
         let webViewConfiguration = WKWebViewConfiguration()
         webViewConfiguration.userContentController = userContentController
         webViewConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
-        webViewConfiguration.websiteDataStore = .default()
+        webViewConfiguration.websiteDataStore = .nonPersistent()
 
         let webView = WKWebView(frame: .zero, configuration: webViewConfiguration)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -153,6 +160,11 @@ public enum ApproovWebViewFactory {
         guard objc_getAssociatedObject(userContentController, &controllerAssociationKey) == nil else {
             throw ApproovWebViewInstallationError.contentControllerAlreadyInstalled
         }
+        let dataStore = webView.configuration.websiteDataStore
+        if let owner = objc_getAssociatedObject(dataStore, &storeAssociationKey) as? ApproovWebViewStoreOwner,
+           owner.webView != nil {
+            throw ApproovWebViewInstallationError.dataStoreAlreadyInUse
+        }
         logger.debug(
             """
             Installing bridge handler '\(configuration.bridgeHandlerName)' with \
@@ -188,6 +200,7 @@ public enum ApproovWebViewFactory {
 
         coordinator.attach(webView: webView)
         objc_setAssociatedObject(userContentController, &controllerAssociationKey, true as NSNumber, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        objc_setAssociatedObject(dataStore, &storeAssociationKey, ApproovWebViewStoreOwner(webView: webView), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         setInstallation(
             ApproovWebViewInstallation(

@@ -90,6 +90,21 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         withExtendedLifetime(first) {}
     }
 
+    @MainActor
+    func testSharedDataStoreRejectedAndFactoryStoresAreIsolated() throws {
+        let first = try ApproovWebViewFactory.makeWebView(configuration: makeConfiguration())
+        let second = try ApproovWebViewFactory.makeWebView(configuration: makeConfiguration())
+        XCTAssertFalse(first.configuration.websiteDataStore === second.configuration.websiteDataStore)
+        XCTAssertFalse(first.configuration.websiteDataStore.isPersistent)
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = first.configuration.websiteDataStore
+        let third = WKWebView(frame: .zero, configuration: config)
+        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: third, configuration: makeConfiguration())) { error in
+            XCTAssertEqual(error as? ApproovWebViewInstallationError, .dataStoreAlreadyInUse)
+        }
+        XCTAssertEqual(third.configuration.userContentController.userScripts.count, 0)
+    }
+
     private func makeConfiguration() -> ApproovWebViewConfiguration {
         ApproovWebViewConfiguration(
             approovConfig: "config",
