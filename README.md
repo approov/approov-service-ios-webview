@@ -223,7 +223,7 @@ let configuration = ApproovWebViewConfiguration(
     allowedOrigins: ["https://funnel.example.com"]
 )
 
-let webView = ApproovWebViewFactory.makeWebView(
+let webView = try ApproovWebViewFactory.makeWebView(
     configuration: configuration
 )
 
@@ -248,7 +248,7 @@ let webView = WKWebView(frame: .zero, configuration: baseConfiguration)
 webView.scrollView.bounces = true
 webView.backgroundColor = .clear
 
-ApproovWebViewFactory.install(
+try ApproovWebViewFactory.install(
     on: webView,
     configuration: configuration
 )
@@ -294,3 +294,23 @@ This package resolves and uses:
 
 - [`approov-service-urlsession`](https://github.com/approov/approov-service-urlsession)
 - [`approov-ios-sdk`](https://github.com/approov/approov-ios-sdk)
+
+## Routing boundaries and compatibility
+
+The bridge routes matching page `fetch`, enabled XHR, and supported form
+submissions. Initial `WKWebView.load` requests, links, worker traffic and
+ordinary subresources use WebKit networking. They are not automatically
+stamped by the bridge. Protect an endpoint on the server and choose an
+Approov-aware transport for every request that needs a token. A rule for a host
+does not turn its image or script loads into bridged requests.
+
+The bridge is a native networking integration with explicit origin and endpoint
+rules. It should not be assumed to provide every browser networking semantic.
+Test the actual application flow, including credentials, redirects, forms and
+errors, with the deployed service version. Allowed page origins and protected
+API destinations serve different purposes; enumerate both independently.
+
+Factory installation throws when the view, content controller, coordinator, or
+data store is already in use. Use one coordinator and content controller per
+view and an isolated website data store. Factory-created views use a fresh
+nonpersistent store. Install before loading and handle installation failures.
