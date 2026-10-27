@@ -92,4 +92,26 @@ import XCTest
         catch { XCTAssertTrue(error is ApproovWebViewBridgeError) }
     }
 
+    func testRedirectPreflightUsesHeadersRemainingAfterSanitization() async throws {
+        let config=ApproovWebViewConfiguration(approovConfig:"fixture",protectedEndpoints:[
+            .init(host:"api.example.com",pathPrefix:"/"), .init(host:"other.example.com",pathPrefix:"/")], allowedOrigins:["https://page.example.com"])
+        let transport=ApproovWebViewRequestExecutor.TestTransport(bootstrap:{},signer:{ request in
+            var request=request; request.setValue("synthetic",forHTTPHeaderField:"approov-token"); return request
+        },send:{ request in
+            let headers=["Access-Control-Allow-Origin":"https://page.example.com", "Access-Control-Allow-Headers":"x-custom"]
+            let response=HTTPURLResponse(url:request.url!,statusCode:request.url!.host == "api.example.com" && request.httpMethod != "OPTIONS" ? 302 : 200,httpVersion:nil,headerFields:headers)!
+            if request.url!.host == "other.example.com" {
+                XCTAssertNotEqual(request.httpMethod,"OPTIONS")
+                XCTAssertNil(request.value(forHTTPHeaderField:"X-Custom"))
+                return (Data(),response,nil)
+            }
+            if request.httpMethod == "OPTIONS" { return (Data(),response,nil) }
+            var next=URLRequest(url:URL(string:"https://other.example.com/next")!)
+            next.setValue("page value",forHTTPHeaderField:"X-Custom")
+            return (Data(),response,next)
+        })
+        let executor=try ApproovWebViewRequestExecutor(configuration:config,cookieBridge:ApproovWebViewCookieBridge(storeAdapter:EmptyCookieStore()),testTransport:transport)
+        _ = try await executor.execute(request(headers:["X-Custom":"page value"]),context:context)
+    }
+
 }
