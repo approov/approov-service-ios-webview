@@ -32,15 +32,25 @@ final actor ApproovWebViewRequestExecutor {
     private let redirectDelegate: ApproovWebViewRedirectDelegate
     private let urlSession: ApproovURLSession
     private let logger: ApproovWebViewLogger
+    // Internal seams allow policy tests to exercise the executor without SDK
+    // network access. Production construction leaves these unset.
+    struct TestTransport {
+        let bootstrap: () throws -> Void
+        let signer: (URLRequest) throws -> URLRequest
+        let send: (URLRequest) async throws -> (Data, URLResponse, URLRequest?)
+    }
+    private let testTransport: TestTransport?
     private let scopeID = UUID().uuidString
     private var didInitializeApproov = false
     private var activeRequests = 0
 
     init(
         configuration: ApproovWebViewConfiguration,
-        cookieBridge: ApproovWebViewCookieBridge
+        cookieBridge: ApproovWebViewCookieBridge,
+        testTransport: TestTransport? = nil
     ) throws {
         self.configuration = configuration
+        self.testTransport = testTransport
         self.cookieBridge = cookieBridge
         self.logger = ApproovWebViewLogger(configuration: configuration)
 
@@ -75,7 +85,7 @@ final actor ApproovWebViewRequestExecutor {
             let maxBytes = max(0, configuration.maximumRequestBodyBytes)
             guard body.utf8.count / 4 <= (maxBytes / 3 + 1) else { throw URLError(.dataLengthExceedsMaximum) }
         }
-        let mode = proxyRequest.mode ?? (proxyRequest.requestSource == .form ? "navigate" : "cors")
+        let mode = proxyRequest.mode ?? (proxyRequest.responseHandling == .navigation ? "navigate" : "cors")
         let credentialsMode = proxyRequest.credentials ?? "same-origin"
         // A page-controlled payload may not select navigation mode while asking
         // for a readable response, which would bypass CORS checks.
@@ -108,7 +118,7 @@ final actor ApproovWebViewRequestExecutor {
             throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
         }
         if credentials != "omit" { await synchronizeCookiesIntoNativeStorage() }
-        try initializeApproovIfNeeded()
+        if let testTransport { try testTransport.bootstrap() } else { try initializeApproovIfNeeded() }
 
         var request = requestContext.request
         if allowsCookies(credentials: credentials, url: requestContext.requestURL, context: context) {
@@ -274,12 +284,16 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     private func performSignedRequest(_ request: URLRequest) async throws -> (Data, URLResponse, URLRequest?) {
-        let tokenHeader = ApproovService.getApproovTokenHeader()
+        let tokenHeader = testTransport == nil ? ApproovService.getApproovTokenHeader() : configuration.approovTokenHeaderName
         var signed = try ApproovWebViewTokenPolicy.sign(request, header: tokenHeader,
             prefix: configuration.approovTokenHeaderPrefix,
             allowMissing: configuration.allowRequestsWithoutApproovToken,
-            signer: { try ApproovService.signRequest($0) })
+            signer: { request in
+                if let testTransport { return try testTransport.signer(request) }
+                return try ApproovService.signRequest(request)
+            })
         ApproovWebViewServiceMutator.markAlreadySigned(&signed)
+        if let testTransport { return try await testTransport.send(signed) }
         return try await performPinnedRequest(signed)
     }
 
