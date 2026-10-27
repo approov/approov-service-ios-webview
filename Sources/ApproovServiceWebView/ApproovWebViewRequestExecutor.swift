@@ -63,9 +63,9 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Executes a page-originated request natively.
-    func execute(_ proxyRequest: ApproovWebViewProxyRequest) async throws -> ApproovWebViewExecutionResult {
+    func execute(_ proxyRequest: ApproovWebViewProxyRequest, context: ApproovWebViewRequestContext) async throws -> ApproovWebViewExecutionResult {
         logger.debug("Starting native execution for \(proxyRequest.logDescription)")
-        let requestContext = try makeRequestContext(from: proxyRequest)
+        let requestContext = try makeRequestContext(from: proxyRequest, context: context)
         guard configuration.isProtectedEndpoint(requestContext.requestURL) else {
             logger.error(
                 """
@@ -201,7 +201,8 @@ final actor ApproovWebViewRequestExecutor {
 
     /// Builds the native `URLRequest` from the JavaScript payload.
     private func makeRequestContext(
-        from proxyRequest: ApproovWebViewProxyRequest
+        from proxyRequest: ApproovWebViewProxyRequest,
+        context: ApproovWebViewRequestContext
     ) throws -> (requestURL: URL, request: URLRequest) {
         guard let requestURL = URL(string: proxyRequest.url) else {
             throw ApproovWebViewBridgeError.invalidURL(proxyRequest.url)
@@ -215,6 +216,8 @@ final actor ApproovWebViewRequestExecutor {
         request.httpMethod = proxyRequest.method.isEmpty ? "GET" : proxyRequest.method.uppercased()
 
         for (headerName, headerValue) in proxyRequest.headers {
+            // Browser-owned context and cookie headers cannot be asserted by page payloads.
+            guard !["origin", "referer", "cookie", "host"].contains(headerName.lowercased()) else { continue }
             request.setValue(headerValue, forHTTPHeaderField: headerName)
         }
 
@@ -226,11 +229,8 @@ final actor ApproovWebViewRequestExecutor {
             request.httpBody = bodyData
         }
 
-        if let sourcePageURL = proxyRequest.sourcePageURL,
-           let pageURL = URL(string: sourcePageURL) {
-            request.mainDocumentURL = pageURL
-            applyBrowserContextHeaders(to: &request, pageURL: pageURL)
-        }
+        request.mainDocumentURL = context.mainDocumentURL ?? context.frameURL
+        applyBrowserContextHeaders(to: &request, pageURL: context.frameURL)
 
         return (requestURL, request)
     }
