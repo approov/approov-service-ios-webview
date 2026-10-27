@@ -202,6 +202,8 @@ package enum ApproovWebViewJavaScriptBridge {
 
       const serializeBody = async (bodyValue) => {
         if (bodyValue == null) return { bodyBase64: null, contentType: null, byteLength: 0 };
+        const utf8Body = !(bodyValue instanceof FormData || bodyValue instanceof URLSearchParams ||
+          bodyValue instanceof Blob || bodyValue instanceof ArrayBuffer || ArrayBuffer.isView(bodyValue));
         let contentType = null;
         if (bodyValue instanceof Document) {
           contentType = bodyValue.contentType === "text/html" ? "text/html;charset=UTF-8" : "application/xml;charset=UTF-8";
@@ -213,6 +215,7 @@ package enum ApproovWebViewJavaScriptBridge {
           bodyBase64: bodyBuffer.byteLength === 0 ? null : arrayBufferToBase64(bodyBuffer),
           contentType: contentType || request.headers.get("content-type"),
           byteLength: bodyBuffer.byteLength,
+          utf8Body,
         };
       };
 
@@ -1056,6 +1059,9 @@ package enum ApproovWebViewJavaScriptBridge {
             const headers = { ...protectedState.headers };
             if (serializedBody.contentType && !Object.prototype.hasOwnProperty.call(headers, "content-type")) {
               headers["content-type"] = serializedBody.contentType;
+            }
+            if (serializedBody.utf8Body && headers["content-type"]) {
+              headers["content-type"] = headers["content-type"].replace(/(;\s*charset\s*=\s*)(?:"[^"]*"|[^;]*)/gi, "$1UTF-8");
             }
             protectedState.sent = true;
             const nativeResponse = await nativeHandler.postMessage({

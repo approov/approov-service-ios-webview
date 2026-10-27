@@ -666,4 +666,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? [String], ["prototype:0", "cached:0", "immediate:0", "stopped:field=after", "ordinary:true"], "Event method outcomes: \(String(describing: result))")
     }
 
+    func testXHRTextBodiesUseUTF8ForExplicitCharset() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); xhr.open('POST','https://api.example.com/echo');
+            xhr.setRequestHeader('content-type','text/plain;charset=windows-1252');
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send('café'); await done;
+            const payload = JSON.parse(xhr.responseText);
+            const text = new TextDecoder().decode(Uint8Array.from(atob(payload.bodyBase64), character => character.charCodeAt(0)));
+            return /charset=UTF-8/i.test(payload.headers['content-type']) && text === 'café';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
