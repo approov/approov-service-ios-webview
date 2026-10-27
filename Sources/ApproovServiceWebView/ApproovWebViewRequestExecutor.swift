@@ -159,6 +159,13 @@ final actor ApproovWebViewRequestExecutor {
                 )
             }
 
+            guard let sourceURL = httpResponse.url else {
+                throw ApproovWebViewBridgeError.nonHTTPResponse
+            }
+            try ApproovWebViewRedirectPolicy.prepare(
+                &redirectRequest, from: sourceURL,
+                endpoints: configuration.protectedEndpoints
+            )
             nativeCookieJar.prepareRedirect(
                 &redirectRequest,
                 for: redirectURL
