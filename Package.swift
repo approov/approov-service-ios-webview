@@ -28,7 +28,8 @@ let package = Package(
     targets: [
         .target(
             name: "ApproovServiceWebViewCore",
-            path: "Sources/ApproovServiceWebViewCore"
+            path: "Sources/ApproovServiceWebViewCore",
+            resources: [.copy("Resources/public_suffix_list.dat")]
         ),
         .target(
             name: "ApproovServiceWebView",
