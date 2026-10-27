@@ -79,16 +79,16 @@ enum ApproovWebViewBridgeError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case let .invalidURL(url):
-            return "The WebView requested an invalid URL: \(url)"
-        case let .unsupportedScheme(url):
-            return "Only HTTP and HTTPS requests can be proxied by the Approov WebView bridge: \(url)"
+        case .invalidURL:
+            return "The WebView requested an invalid URL."
+        case .unsupportedScheme:
+            return "Only HTTP and HTTPS requests can use the native bridge."
         case .invalidRequestBody:
             return "The WebView request body was not valid base64."
         case .approovConfigEmpty:
             return "The Approov config string is empty."
-        case let .requestNotProtected(url):
-            return "The WebView tried to proxy an unprotected request through native code: \(url)"
+        case .requestNotProtected:
+            return "The request does not match a protected endpoint."
         case .nonHTTPResponse:
             return "Native networking returned a non-HTTP response."
         case .webViewUnavailable:
