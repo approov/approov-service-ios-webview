@@ -569,6 +569,7 @@ package enum ApproovWebViewJavaScriptBridge {
         const protectedState = {
           active: false,
           aborted: false,
+          sending: false,
           headers: {},
           method: "GET",
           overrideMimeType: null,
@@ -587,6 +588,7 @@ package enum ApproovWebViewJavaScriptBridge {
 
         const changeProtectedReadyState = (nextState) => {
           protectedState.readyState = nextState;
+          if (nextState === 4) protectedState.sending = false;
           xhr.dispatchEvent(makeXHREvent("readystatechange"));
         };
 
@@ -711,6 +713,7 @@ package enum ApproovWebViewJavaScriptBridge {
           const resolvedURL = new URL(url, window.location.href).toString();
 
           protectedState.aborted = false;
+          protectedState.sending = false;
           protectedState.active = false;
           protectedState.headers = {};
           protectedState.method = (method || "GET").toUpperCase();
@@ -810,6 +813,10 @@ package enum ApproovWebViewJavaScriptBridge {
             return;
           }
 
+          if (protectedState.readyState !== 1 || protectedState.sending) {
+            throw new DOMException("XMLHttpRequest is not opened or send is already in progress", "InvalidStateError");
+          }
+          protectedState.sending = true;
           void (async () => {
           try {
             const nativeResponse = await nativeHandler.postMessage({

@@ -200,4 +200,16 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRDuplicateSendThrowsSynchronously() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); xhr.open('GET', 'https://api.example.com/');
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send();
+            let rejected = false;
+            try { xhr.send(); } catch (error) { rejected = error.name === 'InvalidStateError'; }
+            await done; return rejected;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
