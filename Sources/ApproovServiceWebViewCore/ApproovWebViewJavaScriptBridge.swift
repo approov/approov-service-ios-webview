@@ -325,6 +325,9 @@ package enum ApproovWebViewJavaScriptBridge {
         const enctype = resolveFormEnctype(form, submitter);
         const actionURL = resolveFormAction(form, submitter);
         const responseHandling = resolveFormResponseHandling(form);
+        if (responseHandling === "navigation" && window.top !== window) {
+          throw new DOMException("Protected iframe form navigation is not supported; use response mode", "NotSupportedError");
+        }
         const formData = new FormData(form);
 
         appendSubmitterToFormData(formData, submitter);

@@ -391,4 +391,16 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testIframeNavigationFormFailsClearly() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const frame = document.createElement('iframe'); frame.srcdoc = '<form action="https://api.example.com/echo"></form>';
+            const loaded = new Promise(resolve => frame.onload = resolve); document.body.append(frame); await loaded;
+            const form = frame.contentDocument.querySelector('form');
+            const done = new Promise(resolve => form.addEventListener('approov:form-error', event => resolve(event.detail.message), {once:true}));
+            form.requestSubmit(); return (await done).includes('iframe');
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
