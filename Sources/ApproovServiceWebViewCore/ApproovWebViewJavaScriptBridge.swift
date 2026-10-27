@@ -1033,11 +1033,13 @@ package enum ApproovWebViewJavaScriptBridge {
             return;
           }
 
-          if (protectedState.readyState !== 1 || protectedState.sending) {
-            throw new DOMException("XMLHttpRequest is not opened or send is already in progress", "InvalidStateError");
-          }
           if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
             throw new TypeError("Streaming protected XMLHttpRequest bodies are not supported");
+          }
+          if (body != null && !(body instanceof Document || body instanceof FormData || body instanceof URLSearchParams ||
+              body instanceof Blob || body instanceof ArrayBuffer || ArrayBuffer.isView(body))) body = toDOMString(body);
+          if (protectedState.readyState !== 1 || protectedState.sending) {
+            throw new DOMException("XMLHttpRequest is not opened or send is already in progress", "InvalidStateError");
           }
           protectedState.sending = true;
           protectedState.sendStarted = performance.now();

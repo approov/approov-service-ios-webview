@@ -679,4 +679,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRBodyConversionErrorsThrowSynchronously() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); xhr.open('POST','https://api.example.com/');
+            for (const body of [Symbol('body'), {toString(){throw new TypeError('fixture conversion');}}]) {
+                try { xhr.send(body); return false; } catch(error) { if (!(error instanceof TypeError)) return false; }
+            }
+            const done = new Promise(resolve => xhr.onloadend = resolve); const value = xhr.send('valid'); await done;
+            return value === undefined && xhr.status === 200;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
