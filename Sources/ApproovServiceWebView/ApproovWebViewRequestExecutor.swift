@@ -246,24 +246,19 @@ final actor ApproovWebViewRequestExecutor {
         }
 
         request.mainDocumentURL = context.mainDocumentURL ?? context.frameURL
-        applyBrowserContextHeaders(to: &request, pageURL: context.frameURL)
+        if let referrer = try ApproovWebViewBrowserPolicy.referrer(
+            pageURL: context.frameURL, sourceOrigin: context.frameOrigin,
+            destination: requestURL, requestedReferrer: proxyRequest.referrer,
+            policy: proxyRequest.referrerPolicy
+        ) {
+            request.setValue(referrer, forHTTPHeaderField: "Referer")
+        }
+        if ApproovWebViewBrowserPolicy.isCrossOrigin(requestURL, sourceOrigin: context.frameOrigin)
+            || shouldApplyOriginHeader(forHTTPMethod: request.httpMethod) {
+            request.setValue(context.frameOrigin, forHTTPHeaderField: "Origin")
+        }
 
         return (requestURL, request)
-    }
-
-    /// Mirrors browser-managed headers that matter for API compatibility.
-    private func applyBrowserContextHeaders(to request: inout URLRequest, pageURL: URL) {
-        if request.value(forHTTPHeaderField: "Referer") == nil {
-            request.setValue(pageURL.absoluteString, forHTTPHeaderField: "Referer")
-        }
-
-        guard shouldApplyOriginHeader(forHTTPMethod: request.httpMethod),
-              request.value(forHTTPHeaderField: "Origin") == nil,
-              let origin = Self.originString(from: pageURL) else {
-            return
-        }
-
-        request.setValue(origin, forHTTPHeaderField: "Origin")
     }
 
     /// Copies cookies from WebKit into native storage before each request.
