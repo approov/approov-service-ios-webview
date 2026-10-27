@@ -18,10 +18,10 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         var coordinator: ApproovWebViewCoordinator? = ApproovWebViewFactory.makeCoordinator(
             configuration: configuration)
         var first: WKWebView? = makeView(store: store)
-        weak var releasedView = first
+        let releasedView = WeakReference(first)
         try ApproovWebViewFactory.install(
             on: try XCTUnwrap(first), configuration: configuration, coordinator: coordinator)
-        weak var lease = coordinator?.storeLifetimeOwner
+        let lease = WeakReference(coordinator?.storeLifetimeOwner)
         let leaseReleased = expectation(description: "store lease released after cookie work")
         objc_setAssociatedObject(
             try XCTUnwrap(coordinator?.storeLifetimeOwner), &Self.lifetimeProbeKey,
@@ -37,8 +37,8 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         // reconciliation still owns its store lease through the cookie bridge.
         first = nil
         coordinator = nil
-        XCTAssertNil(releasedView)
-        XCTAssertNotNil(lease)
+        XCTAssertNil(releasedView.value)
+        XCTAssertNotNil(lease.value)
         let replacement = makeView(store: store)
         XCTAssertThrowsError(try ApproovWebViewFactory.install(on: replacement, configuration: configuration)) {
             error in
@@ -57,7 +57,7 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         await flush?.value
         flush = nil
         await fulfillment(of: [leaseReleased], timeout: 5)
-        XCTAssertNil(lease)
+        XCTAssertNil(lease.value)
 
         try ApproovWebViewFactory.install(on: replacement, configuration: configuration)
         XCTAssertEqual(replacement.configuration.userContentController.userScripts.count, 1)
@@ -80,6 +80,11 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
             ]))
         return Task { await bridge.synchronize(deleting: [], setting: [cookie]) }
     }
+}
+
+private final class WeakReference {
+    weak var value: AnyObject?
+    init(_ value: AnyObject?) { self.value = value }
 }
 
 @MainActor

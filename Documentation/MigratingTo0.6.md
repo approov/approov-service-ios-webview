@@ -69,6 +69,17 @@ Unsupported browser policies reject protected requests.
 Cross-site credentialed requests, `no-cors`, manual redirects, nonempty integrity metadata, and streaming are unsupported.
 The native route does not share WebKit's HTTP cache or preflight cache.
 Its default request path bypasses the local HTTP cache.
+
+The default limits are 10 MiB per request or response, 16 concurrent requests,
+and a 60-second native resource deadline. Configure these limits for the API.
+Event-stream responses reject rather than holding a bridge request open.
+
+Fetch response headers support ordinary read methods and reject mutations.
+Calls through `Headers.prototype` on the response header proxy fail the native
+brand check. Parsed XHR documents do not reproduce WebKit document URL metadata.
+XHR progress reports the buffered transfer, not incremental network delivery.
+Scripts must not replace the bridge wrappers or retain native event methods
+before bridge installation. Test the actual page libraries before migration.
 Review the [routing boundaries](../README.md#routing-boundaries-and-compatibility) before migrating an initial POST or a worker request.
 
 If the host already initializes Approov, use `usesExistingApproovService: true`.

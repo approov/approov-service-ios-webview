@@ -104,6 +104,7 @@ Unmatched requests continue through WebKit unchanged.
 | `interceptXMLHttpRequests` | Enables or disables JavaScript `XMLHttpRequest` interception. Default: `true`. |
 | `interceptForms` | Enables supported main-frame form interception. Default: `true`. |
 | `maximumRequestBodyBytes` | Maximum buffered request body size. Default: 10 MiB. |
+| `maximumRequestDuration` | Native request resource deadline in seconds. Default: 60. |
 | `maximumResponseBodyBytes` | Maximum buffered response body size. Default: 10 MiB. |
 | `maximumConcurrentRequests` | Maximum active native bridge requests per view. Default: 16. |
 | `usesExistingApproovService` | Uses the service that the host already initialized. Default: `false`. |
