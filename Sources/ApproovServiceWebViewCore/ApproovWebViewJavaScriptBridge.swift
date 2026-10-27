@@ -1080,6 +1080,8 @@ package enum ApproovWebViewJavaScriptBridge {
       });
 
       if (formBridgeEnabled) {
+      const handledSubmitEvents = new WeakSet();
+      const inlineHandlerOriginals = new WeakMap();
       const recordSubmitterClick = (event) => {
         const clickedElement = event.target instanceof Element
           ? event.target.closest("button, input")
@@ -1104,20 +1106,25 @@ package enum ApproovWebViewJavaScriptBridge {
       // trusted event listeners and are too early for this purpose.
       const handleFormSubmit = (event) => {
         const form = event.target;
-        if (!(form instanceof HTMLFormElement) || !event.cancelable) return;
+        if (!(form instanceof HTMLFormElement) || !event.cancelable || handledSubmitEvents.has(event)) return;
+        handledSubmitEvents.add(event);
         const submitter = "submitter" in event ? event.submitter : submitterByForm.get(form) || null;
         const point = imageCoordinates.get(submitter) || null;
         let cancelled = event.defaultPrevented;
         let reserved = false;
         let failure = null;
         const inlineHandlers = event.composedPath().filter(target => target && "onsubmit" in Object(target)).map(target => {
-          const original = target.onsubmit;
+          const current = target.onsubmit;
+          const original = typeof current === "function" ? inlineHandlerOriginals.get(current) || current : current;
           const wrapped = typeof original === "function" ? function (...args) {
             const result = original.apply(this, args);
             if (result === false) cancelled = true;
             return result;
           } : original;
-          if (wrapped !== original) target.onsubmit = wrapped;
+          if (wrapped !== original) {
+            inlineHandlerOriginals.set(wrapped, original);
+            target.onsubmit = wrapped;
+          }
           return { target, original, wrapped };
         });
         const preventDefault = event.preventDefault;
@@ -1153,9 +1160,10 @@ package enum ApproovWebViewJavaScriptBridge {
         setTimeout(() => {
           finishTarget.removeEventListener("submit", finish);
           for (const { target, original, wrapped } of inlineHandlers) {
-            if (target.onsubmit === wrapped) {
-              if (wrapped !== original) target.onsubmit = original;
-            } else if (reserved && !cancelled) {
+            const current = target.onsubmit;
+            if (current === wrapped || (typeof current === "function" && inlineHandlerOriginals.get(current) === original)) {
+              if (current !== original) target.onsubmit = original;
+            } else if (current !== original && reserved && !cancelled) {
               failure = new DOMException("Replacing inline submit handlers during a protected submission is not supported", "NotSupportedError");
             }
           }
