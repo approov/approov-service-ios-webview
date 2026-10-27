@@ -502,9 +502,9 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                 document.body.innerHTML = '<form action="https://api.example.com/echo"></form>';
                 const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
                 let responses = 0; form.addEventListener('approov:form-response', () => responses++);
-                if (mode === 'inline' || mode === 'stopped-inline') form.onsubmit = () => false;
+                if (mode === 'inline') form.onsubmit = () => false;
                 if (mode === 'window-inline') window.onsubmit = () => false;
-                if (mode === 'stopped-inline') form.addEventListener('submit', event => event.stopPropagation(), true);
+                if (mode === 'stopped-inline') form.onsubmit = event => { event.stopPropagation(); return false; };
                 if (mode === 'capture') form.addEventListener('submit', event => event.preventDefault(), true);
                 if (mode === 'bubble') form.addEventListener('submit', event => event.preventDefault());
                 form.requestSubmit(); await new Promise(resolve => setTimeout(resolve, 20));
@@ -703,6 +703,20 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             return bytes.includes('before') && !bytes.includes('after');
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testNativeCaptureStopSkipsLaterInlineSubmitHandler() async throws {
+        let view = await fixture(preScript: "window.nativeStopPropagation = Event.prototype.stopPropagation;")
+        let result = try await view.callAsyncJavaScript("""
+            const form = document.createElement('form'); form.action = 'about:blank'; document.body.append(form);
+            let inlineCalled = false; form.onsubmit = () => { inlineCalled = true; return false; };
+            form.addEventListener('submit', event => window.nativeStopPropagation.call(event), true);
+            const event = new SubmitEvent('submit', {bubbles:true, cancelable:true});
+            const uncancelled = form.dispatchEvent(event);
+            return {inlineCalled, prevented:event.defaultPrevented, uncancelled};
+            """, arguments: [:], in: nil, contentWorld: .page)
+        let outcome = result as? [String: Bool]
+        XCTAssertEqual(outcome, ["inlineCalled": false, "prevented": false, "uncancelled": true], "Native target phase outcome: \(String(describing: result))")
     }
 
 }
