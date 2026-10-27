@@ -75,7 +75,17 @@ final actor ApproovWebViewRequestExecutor {
             let maxBytes = max(0, configuration.maximumRequestBodyBytes)
             guard body.utf8.count / 4 <= (maxBytes / 3 + 1) else { throw URLError(.dataLengthExceedsMaximum) }
         }
+        let mode = proxyRequest.mode ?? (proxyRequest.requestSource == .form ? "navigate" : "cors")
+        let credentialsMode = proxyRequest.credentials ?? "same-origin"
+        try ApproovWebViewBrowserPolicy.validateOptions(mode: mode, credentials: credentialsMode,
+            redirect: proxyRequest.redirect ?? "follow", cache: proxyRequest.cache ?? "default",
+            integrity: proxyRequest.integrity ?? "")
+        try ApproovWebViewBrowserPolicy.validatePageHeaders(proxyRequest.headers,
+            tokenHeader: configuration.approovTokenHeaderName)
         let requestContext = try makeRequestContext(from: proxyRequest, context: context)
+        if mode == "same-origin" && ApproovWebViewBrowserPolicy.isCrossOrigin(requestContext.requestURL, sourceOrigin: context.frameOrigin) {
+            throw ApproovWebViewBrowserPolicyError.corsRejected
+        }
         guard configuration.isProtectedEndpoint(requestContext.requestURL) else {
             logger.error(
                 """
@@ -105,7 +115,8 @@ final actor ApproovWebViewRequestExecutor {
         let httpResponse: HTTPURLResponse
         do {
             (data, httpResponse) = try await performPinnedRequestFollowingRedirects(
-                request, credentials: credentials, context: context
+                request, credentials: credentials, context: context, mode: mode,
+                pageHeaders: proxyRequest.headers, redirectMode: proxyRequest.redirect ?? "follow"
             )
         } catch {
             // A successful redirect response may already have mutated the jar.
@@ -132,7 +143,10 @@ final actor ApproovWebViewRequestExecutor {
             url: finalURL.absoluteString,
             status: httpResponse.statusCode,
             statusText: HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode),
-            headers: normalizeHeaders(httpResponse.allHeaderFields),
+            headers: ApproovWebViewBrowserPolicy.exposedHeaders(
+                normalizeHeaders(httpResponse.allHeaderFields),
+                crossOrigin: mode != "navigate" && ApproovWebViewBrowserPolicy.isCrossOrigin(finalURL, sourceOrigin: context.frameOrigin),
+                credentials: credentials),
             bodyBase64: data.base64EncodedString()
         )
 
@@ -161,26 +175,43 @@ final actor ApproovWebViewRequestExecutor {
     /// the automatic follow and returns that proposal here, where the stale
     /// Cookie header is rebuilt for the destination URL.
     private func performPinnedRequestFollowingRedirects(
-        _ request: URLRequest, credentials: String, context: ApproovWebViewRequestContext
+        _ request: URLRequest, credentials: String, context: ApproovWebViewRequestContext,
+        mode: String, pageHeaders: [String: String], redirectMode: String
     ) async throws -> (Data, HTTPURLResponse) {
         var currentRequest = request
         var redirectCount = 0
 
         while true {
-            let tokenHeader = ApproovService.getApproovTokenHeader()
-            var signedRequest = try ApproovWebViewTokenPolicy.sign(
-                currentRequest, header: tokenHeader,
-                prefix: configuration.approovTokenHeaderPrefix,
-                allowMissing: configuration.allowRequestsWithoutApproovToken,
-                signer: { try ApproovService.signRequest($0) }
-            )
-            ApproovWebViewServiceMutator.markAlreadySigned(&signedRequest)
-            let (data, response, proposedRedirect) =
-                try await performPinnedRequest(signedRequest)
+            guard let currentURL = currentRequest.url else { throw URLError(.badURL) }
+            let crossOrigin = ApproovWebViewBrowserPolicy.isCrossOrigin(currentURL, sourceOrigin: context.frameOrigin)
+            if mode == "same-origin" && crossOrigin { throw ApproovWebViewBrowserPolicyError.corsRejected }
+            let method = (currentRequest.httpMethod ?? "GET").uppercased()
+            if mode == "cors" && crossOrigin && ApproovWebViewBrowserPolicy.needsPreflight(method: method, headers: pageHeaders) {
+                var preflight = URLRequest(url: currentURL)
+                preflight.httpMethod = "OPTIONS"
+                preflight.setValue(context.frameOrigin, forHTTPHeaderField: "Origin")
+                preflight.setValue(method, forHTTPHeaderField: "Access-Control-Request-Method")
+                let names = ApproovWebViewBrowserPolicy.unsafeHeaderNames(pageHeaders)
+                if !names.isEmpty { preflight.setValue(names.joined(separator: ","), forHTTPHeaderField: "Access-Control-Request-Headers") }
+                preflight.httpShouldHandleCookies = false
+                ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &preflight)
+                let (_, preflightResponse, preflightRedirect) = try await performSignedRequest(preflight)
+                guard preflightRedirect == nil, let response = preflightResponse as? HTTPURLResponse else {
+                    throw ApproovWebViewBrowserPolicyError.corsRejected
+                }
+                try ApproovWebViewBrowserPolicy.checkPreflight(status: response.statusCode,
+                    headers: normalizeHeaders(response.allHeaderFields), sourceOrigin: context.frameOrigin,
+                    credentials: credentials, method: method, requestHeaders: pageHeaders)
+            }
+            let (data, response, proposedRedirect) = try await performSignedRequest(currentRequest)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw ApproovWebViewBridgeError.nonHTTPResponse
             }
 
+            if mode == "cors" && crossOrigin {
+                try ApproovWebViewBrowserPolicy.checkCORS(headers: normalizeHeaders(httpResponse.allHeaderFields),
+                    sourceOrigin: context.frameOrigin, credentials: credentials)
+            }
             if let responseURL = httpResponse.url,
                allowsCookies(credentials: credentials, url: responseURL, context: context) {
                 storeResponseCookies(from: httpResponse)
@@ -190,6 +221,7 @@ final actor ApproovWebViewRequestExecutor {
                 return (data, httpResponse)
             }
 
+            guard redirectMode == "follow" else { throw URLError(.redirectToNonExistentLocation) }
             guard redirectCount < Self.maximumRedirectCount else {
                 throw URLError(.httpTooManyRedirects)
             }
@@ -219,6 +251,16 @@ final actor ApproovWebViewRequestExecutor {
             )
             currentRequest = redirectRequest
         }
+    }
+
+    private func performSignedRequest(_ request: URLRequest) async throws -> (Data, URLResponse, URLRequest?) {
+        let tokenHeader = ApproovService.getApproovTokenHeader()
+        var signed = try ApproovWebViewTokenPolicy.sign(request, header: tokenHeader,
+            prefix: configuration.approovTokenHeaderPrefix,
+            allowMissing: configuration.allowRequestsWithoutApproovToken,
+            signer: { try ApproovService.signRequest($0) })
+        ApproovWebViewServiceMutator.markAlreadySigned(&signed)
+        return try await performPinnedRequest(signed)
     }
 
     /// Builds the native `URLRequest` from the JavaScript payload.
