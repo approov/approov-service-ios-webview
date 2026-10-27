@@ -113,8 +113,9 @@ final actor ApproovWebViewRequestExecutor {
 
         let data: Data
         let httpResponse: HTTPURLResponse
+        let redirected: Bool
         do {
-            (data, httpResponse) = try await performPinnedRequestFollowingRedirects(
+            (data, httpResponse, redirected) = try await performPinnedRequestFollowingRedirects(
                 request, credentials: credentials, context: context, mode: mode,
                 pageHeaders: proxyRequest.headers, redirectMode: proxyRequest.redirect ?? "follow",
                 requestedReferrer: proxyRequest.referrer, referrerPolicy: proxyRequest.referrerPolicy
@@ -148,7 +149,9 @@ final actor ApproovWebViewRequestExecutor {
                 normalizeHeaders(httpResponse.allHeaderFields),
                 crossOrigin: mode != "navigate" && ApproovWebViewBrowserPolicy.isCrossOrigin(finalURL, sourceOrigin: context.frameOrigin),
                 credentials: credentials),
-            bodyBase64: data.base64EncodedString()
+            bodyBase64: data.base64EncodedString(),
+            redirected: redirected,
+            type: mode == "cors" && ApproovWebViewBrowserPolicy.isCrossOrigin(finalURL, sourceOrigin: context.frameOrigin) ? "cors" : "basic"
         )
 
         switch proxyRequest.responseHandling {
@@ -179,7 +182,7 @@ final actor ApproovWebViewRequestExecutor {
         _ request: URLRequest, credentials: String, context: ApproovWebViewRequestContext,
         mode: String, pageHeaders: [String: String], redirectMode: String,
         requestedReferrer: String?, referrerPolicy: String?
-    ) async throws -> (Data, HTTPURLResponse) {
+    ) async throws -> (Data, HTTPURLResponse, Bool) {
         var currentRequest = request
         var redirectCount = 0
 
@@ -220,7 +223,7 @@ final actor ApproovWebViewRequestExecutor {
             }
 
             guard var redirectRequest = proposedRedirect else {
-                return (data, httpResponse)
+                return (data, httpResponse, redirectCount > 0)
             }
 
             guard redirectMode == "follow" else { throw URLError(.redirectToNonExistentLocation) }
