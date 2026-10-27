@@ -19,6 +19,12 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
     private static let requestScopeProperty = "ApproovWebViewBridge.ScopeID"
     private static let signedRequestProperty = "ApproovWebViewBridge.AlreadySigned"
 
+    static func clearAlreadySigned(_ request: inout URLRequest) {
+        let mutable = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
+        URLProtocol.removeProperty(forKey: signedRequestProperty, in: mutable)
+        request = mutable as URLRequest
+    }
+
     static func markAlreadySigned(_ request: inout URLRequest) {
         let mutable = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: signedRequestProperty, in: mutable)
@@ -182,33 +188,9 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
         _ approovResults: ApproovTokenFetchResult,
         url: String
     ) throws -> Bool {
-        do {
-            return try baseMutator.handleInterceptorFetchTokenResult(
-                approovResults,
-                url: url
-            )
-        } catch let error as ApproovError {
-            let matchingPolicies = Self.policies(matching: url)
-            let canFailOpen = !matchingPolicies.isEmpty
-                && matchingPolicies.allSatisfy(\.allowRequestsWithoutApproovToken)
-
-            if canFailOpen {
-                switch error {
-                case .networkingError:
-                    matchingPolicies.first?.logger.debug(
-                        """
-                        Allowing fail-open handling after Approov networking error for \
-                        \(ApproovWebViewLogger.redactedURLForLog(url))
-                        """
-                    )
-                    return false
-                default:
-                    break
-                }
-            }
-
-            throw error
-        }
+        // The SDK callback does not identify the request or WebView scope.
+        // Never relax policy for unrelated host requests to the same URL.
+        try baseMutator.handleInterceptorFetchTokenResult(approovResults, url: url)
     }
 
     func handleInterceptorHeaderSubstitutionResult(

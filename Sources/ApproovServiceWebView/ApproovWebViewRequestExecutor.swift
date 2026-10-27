@@ -285,13 +285,19 @@ final actor ApproovWebViewRequestExecutor {
 
     private func performSignedRequest(_ request: URLRequest) async throws -> (Data, URLResponse, URLRequest?) {
         let tokenHeader = testTransport == nil ? ApproovService.getApproovTokenHeader() : configuration.approovTokenHeaderName
-        var signed = try ApproovWebViewTokenPolicy.sign(request, header: tokenHeader,
+        var unsigned = request
+        // Foundation can carry URLProtocol properties into redirect proposals.
+        ApproovWebViewServiceMutator.clearAlreadySigned(&unsigned)
+        var signed = try ApproovWebViewTokenPolicy.sign(unsigned, header: tokenHeader,
             prefix: configuration.approovTokenHeaderPrefix,
             allowMissing: configuration.allowRequestsWithoutApproovToken,
             signer: { request in
                 if let testTransport { return try testTransport.signer(request) }
                 return try ApproovService.signRequest(request)
             })
+        guard let signedURL = signed.url, configuration.isProtectedEndpoint(signedURL) else {
+            throw ApproovWebViewBridgeError.requestNotProtected("<mutated destination>")
+        }
         ApproovWebViewServiceMutator.markAlreadySigned(&signed)
         if let testTransport { return try await testTransport.send(signed) }
         return try await performPinnedRequest(signed)
