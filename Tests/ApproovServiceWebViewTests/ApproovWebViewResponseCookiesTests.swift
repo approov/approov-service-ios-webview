@@ -31,10 +31,22 @@ final class ApproovWebViewResponseCookiesTests: XCTestCase {
     }
 
     func testRejectsUnrelatedAndPublicSuffixDomains() {
-        for domain in ["evil.test", "com", "example.com"] {
+        for domain in ["evil.test", "com"] {
             let cookies = ApproovWebViewResponseCookies.cookies(
                 fromResponseHeaders: ["Set-Cookie": "bad=1; Domain=\(domain); Path=/"], url: url)
             XCTAssertTrue(cookies.isEmpty, domain)
+        }
+    }
+
+    func testAcceptsParentDomainAndValidHostPrefix() {
+        for header in ["parent=1; Domain=example.com; Path=/", "__Host-id=1; Secure; Path=/"] {
+            XCTAssertEqual(ApproovWebViewResponseCookies.cookies(fromResponseHeaders: ["Set-Cookie": header], url: url).count, 1, header)
+        }
+    }
+
+    func testRejectsInvalidHostPrefix() {
+        for header in ["__Host-id=1; Secure", "__Host-id=1; Secure; Domain=api.example.com; Path=/"] {
+            XCTAssertTrue(ApproovWebViewResponseCookies.cookies(fromResponseHeaders: ["Set-Cookie": header], url: url).isEmpty, header)
         }
     }
 
