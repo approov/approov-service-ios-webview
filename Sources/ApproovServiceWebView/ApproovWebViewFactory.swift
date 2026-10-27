@@ -21,6 +21,7 @@ private final class ApproovWebViewInstallation: NSObject {
 public enum ApproovWebViewInstallationError: Error, Equatable {
     case alreadyInstalled
     case javaScriptDisabled
+    case contentControllerAlreadyInstalled
 }
 
 /// Public entry point for creating or installing an Approov-protected WebView.
@@ -29,6 +30,7 @@ public enum ApproovWebViewInstallationError: Error, Equatable {
 /// opinionated and your app needs to work with a raw `WKWebView`.
 public enum ApproovWebViewFactory {
     private static var installationAssociationKey: UInt8 = 0
+    private static var controllerAssociationKey: UInt8 = 0
 
     /// Creates a reusable coordinator for a custom host integration.
     @MainActor
@@ -144,6 +146,9 @@ public enum ApproovWebViewFactory {
         }
 
         let userContentController = webView.configuration.userContentController
+        guard objc_getAssociatedObject(userContentController, &controllerAssociationKey) == nil else {
+            throw ApproovWebViewInstallationError.contentControllerAlreadyInstalled
+        }
         logger.debug(
             """
             Installing bridge handler '\(configuration.bridgeHandlerName)' with \
@@ -169,13 +174,7 @@ public enum ApproovWebViewFactory {
             forMainFrameOnly: false
         )
 
-        // The handler name must be unique within a single user content
-        // controller. Removing the page-world handler first makes installation
-        // deterministic when callers reuse their own controller instance.
-        userContentController.removeScriptMessageHandler(
-            forName: configuration.bridgeHandlerName,
-            contentWorld: .page
-        )
+        // The controller and its scripts belong to exactly one installation.
         userContentController.addUserScript(bridgeScript)
         userContentController.addScriptMessageHandler(
             coordinator,
@@ -184,6 +183,7 @@ public enum ApproovWebViewFactory {
         )
 
         coordinator.attach(webView: webView)
+        objc_setAssociatedObject(userContentController, &controllerAssociationKey, true as NSNumber, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         setInstallation(
             ApproovWebViewInstallation(

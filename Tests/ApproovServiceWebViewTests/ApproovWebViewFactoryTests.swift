@@ -63,6 +63,20 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testSharedContentControllerIsRejectedBeforeMutation() throws {
+        let controller = WKUserContentController()
+        let config = WKWebViewConfiguration()
+        config.userContentController = controller
+        let first = WKWebView(frame: .zero, configuration: config)
+        let second = WKWebView(frame: .zero, configuration: config)
+        try ApproovWebViewFactory.install(on: first, configuration: makeConfiguration())
+        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: second, configuration: makeConfiguration())) { error in
+            XCTAssertEqual(error as? ApproovWebViewInstallationError, .contentControllerAlreadyInstalled)
+        }
+        XCTAssertEqual(controller.userScripts.count, 1)
+    }
+
     private func makeConfiguration() -> ApproovWebViewConfiguration {
         ApproovWebViewConfiguration(
             approovConfig: "config",
