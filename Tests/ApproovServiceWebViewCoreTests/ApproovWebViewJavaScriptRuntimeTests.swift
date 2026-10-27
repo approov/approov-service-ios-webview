@@ -692,4 +692,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRExtractsBodyBeforeLoadStartHandlers() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const body = new FormData(); body.append('field', 'before');
+            const xhr = new XMLHttpRequest(); xhr.open('POST','https://api.example.com/echo');
+            xhr.onloadstart = () => body.set('field', 'after');
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(body); await done;
+            const payload = JSON.parse(xhr.responseText); const bytes = atob(payload.bodyBase64);
+            return bytes.includes('before') && !bytes.includes('after');
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

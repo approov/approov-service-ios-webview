@@ -200,8 +200,8 @@ package enum ApproovWebViewJavaScriptBridge {
         };
       };
 
-      const serializeBody = async (bodyValue) => {
-        if (bodyValue == null) return { bodyBase64: null, contentType: null, byteLength: 0 };
+      const serializeBody = (bodyValue) => {
+        if (bodyValue == null) return Promise.resolve({ bodyBase64: null, contentType: null, byteLength: 0 });
         const utf8Body = !(bodyValue instanceof FormData || bodyValue instanceof URLSearchParams ||
           bodyValue instanceof Blob || bodyValue instanceof ArrayBuffer || ArrayBuffer.isView(bodyValue));
         let contentType = null;
@@ -210,13 +210,12 @@ package enum ApproovWebViewJavaScriptBridge {
           bodyValue = new XMLSerializer().serializeToString(bodyValue);
         }
         const request = new Request("https://approov.invalid/body", { method: "POST", body: bodyValue });
-        const bodyBuffer = await readRequestBody(request);
-        return {
+        return readRequestBody(request).then(bodyBuffer => ({
           bodyBase64: bodyBuffer.byteLength === 0 ? null : arrayBufferToBase64(bodyBuffer),
           contentType: contentType || request.headers.get("content-type"),
           byteLength: bodyBuffer.byteLength,
           utf8Body,
-        };
+        }));
       };
 
       const immutableResponseHeaders = (values) => {
@@ -1041,6 +1040,8 @@ package enum ApproovWebViewJavaScriptBridge {
           if (protectedState.readyState !== 1 || protectedState.sending) {
             throw new DOMException("XMLHttpRequest is not opened or send is already in progress", "InvalidStateError");
           }
+          const serializedBodyPromise = serializeBody(["GET", "HEAD"].includes(protectedState.method) ? null : body);
+          serializedBodyPromise.catch(() => {});
           protectedState.sending = true;
           protectedState.sendStarted = performance.now();
           scheduleProtectedTimeout();
@@ -1056,7 +1057,7 @@ package enum ApproovWebViewJavaScriptBridge {
           if (!isCurrent()) return;
           void (async () => {
           try {
-            const serializedBody = await serializeBody(["GET", "HEAD"].includes(protectedState.method) ? null : body);
+            const serializedBody = await serializedBodyPromise;
             if (!isCurrent()) return;
             const headers = { ...protectedState.headers };
             if (serializedBody.contentType && !Object.prototype.hasOwnProperty.call(headers, "content-type")) {
