@@ -10,10 +10,15 @@ The complete suite passed on October 27, 2026, with Xcode 27.1 (27A9275).
 The iOS 27 run also passed on a newly created simulator after the cold-start fixture correction.
 That correction gives WebKit document startup a 30-second bound and stops before JavaScript after a failed load.
 It does not change library behavior or the test assertions.
+The fixtures use separate nonpersistent website stores, matching the factory default.
+On fresh iOS 26.5 devices, the old persistent-store fixture failed its first navigation.
+The isolated-store fixture passed all seven comparison tests.
+Both checks ran six cookie tests before the first browser test.
 
 | Simulator | Tested revision | Passed | Failed | Skipped |
 | --- | --- | ---: | ---: | ---: |
 | Fresh iPhone 18 Pro, iOS 27.0 (24A434) | `276e039` | 195 | 0 | 0 |
+| Fresh iPhone 17 Pro, iOS 26.5 (23F77) | `a3b7984` | 195 | 0 | 0 |
 | iPhone 16 Pro, iOS 18.6 (22G86) | `f5f871b` | 195 | 0 | 0 |
 
 Each run includes 98 service tests and 97 core tests.
