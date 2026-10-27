@@ -288,8 +288,18 @@ final actor ApproovWebViewRequestExecutor {
             prefix: configuration.approovTokenHeaderPrefix,
             allowMissing: configuration.allowRequestsWithoutApproovToken,
             signer: { request in
-                if let testTransport { return try testTransport.signer(request) }
-                return try ApproovService.signRequest(request)
+                do {
+                    if let testTransport { return try testTransport.signer(request) }
+                    return try ApproovService.signRequest(request)
+                } catch let error as ApproovError {
+                    // The decision belongs to this executor, not the global
+                    // URL-only SDK callback shared with unrelated clients.
+                    if configuration.allowRequestsWithoutApproovToken,
+                       case .networkingError = error {
+                        return request
+                    }
+                    throw error
+                }
             })
         guard let signedURL = signed.url, configuration.isProtectedEndpoint(signedURL) else {
             throw ApproovWebViewBridgeError.requestNotProtected("<mutated destination>")
