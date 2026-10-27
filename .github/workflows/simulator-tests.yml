@@ -22,6 +22,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Run the real WebKit and native transport regression suite
+        timeout-minutes: 25
         run: bash Scripts/test-simulator.sh
       - name: Preserve simulator test evidence
         if: always()

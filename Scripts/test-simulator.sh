@@ -29,6 +29,7 @@ PY
 fi
 
 # A booted device reports an error from boot; bootstatus checks either outcome.
+printf 'Preparing simulator %s\n' "$task_simulator"
 xcrun simctl boot "$task_simulator" 2>/dev/null || true
 xcrun simctl bootstatus "$task_simulator" -b
 task_arguments=(
@@ -38,7 +39,9 @@ task_arguments=(
     -derivedDataPath "$task_derived"
 )
 
+printf 'Resolving package dependencies. Log: %s/resolve.log\n' "$task_run"
 xcodebuild "${task_arguments[@]}" -resolvePackageDependencies > "$task_run/resolve.log" 2>&1
+printf 'Building simulator tests. Log: %s/build.log\n' "$task_run"
 xcodebuild "${task_arguments[@]}" -disableAutomaticPackageResolution -skipPackageUpdates \
     build-for-testing > "$task_run/build.log" 2>&1
 
@@ -50,6 +53,7 @@ if [[ -d "$task_sdk" ]]; then
 fi
 
 task_exit=0
+printf 'Running simulator tests. Log: %s/test.log\n' "$task_run"
 xcodebuild "${task_arguments[@]}" -disableAutomaticPackageResolution -skipPackageUpdates \
     -test-timeouts-enabled YES -default-test-execution-time-allowance 60 \
     -maximum-test-execution-time-allowance 120 -collect-test-diagnostics never \
