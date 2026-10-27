@@ -133,7 +133,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let result = try await view.callAsyncJavaScript("""
             const request = new Request('https://api.example.com/', {method:'POST', body:'body'});
             await fetch(request);
-            return request.bodyUsed;
+            try { await fetch(request); return false; }
+            catch(error) { return request.bodyUsed && error instanceof TypeError; }
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }

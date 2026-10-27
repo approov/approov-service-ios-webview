@@ -514,6 +514,7 @@ package enum ApproovWebViewJavaScriptBridge {
           return originalFetch(input, init);
         }
         const request = input instanceof Request && init === undefined ? input : new Request(input, init);
+        if (request.bodyUsed) throw new TypeError("Request body has already been consumed");
 
         if (request.mode === "no-cors" || request.redirect === "manual" || request.integrity ||
             (typeof ReadableStream !== "undefined" && init?.body instanceof ReadableStream)) {
