@@ -406,7 +406,9 @@ final actor ApproovWebViewRequestExecutor {
     ) async throws -> (Data, URLResponse, URLRequest?) {
         logger.debug("Executing protected request via ApproovURLSession: \(request.logDescription)")
         let redirectDelegate = redirectDelegate
-        return try await withCheckedThrowingContinuation {
+        let taskReference = ApproovWebViewTaskReference()
+        return try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation {
             (
                 continuation:
                     CheckedContinuation<
@@ -414,7 +416,6 @@ final actor ApproovWebViewRequestExecutor {
                         Error
                     >
             ) in
-            let taskReference = ApproovWebViewTaskReference()
             let task = urlSession.dataTask(with: request) { data, response, error in
                 let proposedRedirect = taskReference.taskIdentifier.flatMap {
                     redirectDelegate.takeProposedRequest(
@@ -437,9 +438,12 @@ final actor ApproovWebViewRequestExecutor {
                 )
             }
 
-            taskReference.taskIdentifier = task.taskIdentifier
+            taskReference.register(task)
             task.resume()
-        }
+            }
+        }, onCancel: {
+            taskReference.cancel()
+        })
     }
 
     /// Converts Foundation's heterogenous header map into JSON-safe values.
@@ -504,6 +508,25 @@ private final class ApproovWebViewTaskReference:
     @unchecked Sendable {
     private let lock = NSLock()
     private var storedTaskIdentifier: Int?
+    private var task: URLSessionTask?
+    private var cancelled = false
+
+    func register(_ task: URLSessionTask) {
+        lock.lock()
+        self.task = task
+        storedTaskIdentifier = task.taskIdentifier
+        let shouldCancel = cancelled
+        lock.unlock()
+        if shouldCancel { task.cancel() }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let task = task
+        lock.unlock()
+        task?.cancel()
+    }
 
     var taskIdentifier: Int? {
         get {
