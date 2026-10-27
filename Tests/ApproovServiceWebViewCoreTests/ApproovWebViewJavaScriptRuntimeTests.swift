@@ -46,10 +46,12 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             let url = payload["url"] as? String ?? ""
             let status = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "status" })?.value.flatMap(Int.init) ?? 200
             let delay = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "delay" })?.value.flatMap(Double.init) ?? 0
+            let responseBody = url.contains("/echo")
+                ? (try? JSONSerialization.data(withJSONObject: payload))?.base64EncodedString() ?? "e30=" : "e30="
             let respond = {
             replyHandler(["url": "https://api.example.com/final", "redirected": true,
                           "status": status, "statusText": "OK", "headers": [:],
-                          "bodyBase64": "e30="], nil)
+                          "bodyBase64": responseBody], nil)
             }
             if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000, execute: respond) }
             else { respond() }
@@ -254,6 +256,20 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             }
             try { new XMLHttpRequest().open('GET','https://api.example.com/',true,'user','pass'); return false; }
             catch (error) { return error.name === 'NotSupportedError'; }
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testXHRHeadersCombineAndValidate() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); xhr.open('POST', 'https://api.example.com/echo');
+            xhr.setRequestHeader('X-Test', ' one '); xhr.setRequestHeader('x-test', 'two');
+            xhr.setRequestHeader('Cookie', 'secret'); let syntax = false;
+            try { xhr.setRequestHeader('bad name','value'); } catch(e) { syntax = e.name === 'SyntaxError'; }
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
+            const headers = JSON.parse(xhr.responseText).headers;
+            return syntax && headers['x-test'] === 'one, two' && !headers.cookie;
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }

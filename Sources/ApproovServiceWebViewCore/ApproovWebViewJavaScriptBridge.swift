@@ -575,7 +575,8 @@ package enum ApproovWebViewJavaScriptBridge {
           sent: false,
           timeoutTimer: null,
           sendStarted: 0,
-          headers: {},
+          headers: Object.create(null),
+          headerValidator: null,
           method: "GET",
           overrideMimeType: null,
           readyState: 0,
@@ -750,10 +751,11 @@ package enum ApproovWebViewJavaScriptBridge {
         xhr.open = (method, url, async = true, user = null, password = null) => {
           const resolvedURL = new URL(url, window.location.href).toString();
           const protectedURL = isProtectedEndpoint(resolvedURL);
+          let validator = null;
           if (protectedURL) {
             // Let WebKit perform Web IDL, token and forbidden-method validation
             // without changing the live request or sending browser traffic.
-            const validator = new OriginalXMLHttpRequest();
+            validator = new OriginalXMLHttpRequest();
             validator.open(method, resolvedURL, async, user, password);
             if (!Boolean(async)) {
               throw new DOMException("Synchronous XMLHttpRequest is not supported for protected endpoints.", "NotSupportedError");
@@ -769,7 +771,8 @@ package enum ApproovWebViewJavaScriptBridge {
           protectedState.aborted = false;
           protectedState.sending = false;
           protectedState.active = false;
-          protectedState.headers = {};
+          protectedState.headers = Object.create(null);
+          protectedState.headerValidator = validator;
           const methodString = String(method);
           const normalizedMethod = methodString.toUpperCase();
           protectedState.method = ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"].includes(normalizedMethod)
@@ -803,7 +806,23 @@ package enum ApproovWebViewJavaScriptBridge {
             return;
           }
 
-          protectedState.headers[name] = value;
+          if (protectedState.readyState !== 1 || protectedState.sending) {
+            throw new DOMException("Request headers cannot be changed in this state", "InvalidStateError");
+          }
+          const headerName = String(name);
+          const headerValue = String(value);
+          protectedState.headerValidator.setRequestHeader(headerName, headerValue);
+          const key = headerName.toLowerCase();
+          const forbidden = ["accept-charset", "accept-encoding", "access-control-request-headers",
+            "access-control-request-method", "connection", "content-length", "cookie", "cookie2",
+            "date", "dnt", "expect", "host", "keep-alive", "origin", "permissions-policy", "referer",
+            "te", "trailer", "transfer-encoding", "upgrade", "via"];
+          if (forbidden.includes(key) || key.startsWith("proxy-") || key.startsWith("sec-")) return;
+          if (["x-http-method", "x-http-method-override", "x-method-override"].includes(key) &&
+              headerValue.split(",").some(value => ["CONNECT", "TRACE", "TRACK"].includes(value.trim().toUpperCase()))) return;
+          const normalizedValue = headerValue.replace(/^[\t ]+|[\t ]+$/g, "");
+          protectedState.headers[key] = Object.prototype.hasOwnProperty.call(protectedState.headers, key)
+            ? `${protectedState.headers[key]}, ${normalizedValue}` : normalizedValue;
         };
 
         xhr.getResponseHeader = (name) => {
