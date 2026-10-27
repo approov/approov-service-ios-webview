@@ -160,9 +160,10 @@ package enum ApproovWebViewJavaScriptBridge {
         return bodyBuffer.byteLength === 0 ? null : arrayBufferToBase64(bodyBuffer);
       };
 
-      const makeFetchResponse = (nativeResponse) => {
+      const makeFetchResponse = (nativeResponse, requestMethod) => {
         const responseBytes = base64ToUint8Array(nativeResponse.bodyBase64);
-        return new Response(responseBytes, {
+        const nullBody = requestMethod === "HEAD" || [204, 205, 304].includes(nativeResponse.status);
+        return new Response(nullBody ? null : responseBytes, {
           status: nativeResponse.status,
           statusText: nativeResponse.statusText,
           headers: nativeResponse.headers,
@@ -403,7 +404,7 @@ package enum ApproovWebViewJavaScriptBridge {
           "response",
         );
         const nativeResponse = await nativeHandler.postMessage(payload);
-        return makeFetchResponse(nativeResponse);
+        return makeFetchResponse(nativeResponse, request.method);
       };
 
       const makeXHREvent = (type, detail = null) => {

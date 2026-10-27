@@ -8,8 +8,11 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage,
                                    replyHandler: @escaping (Any?, String?) -> Void) {
+            let payload = message.body as? [String: Any] ?? [:]
+            let url = payload["url"] as? String ?? ""
+            let status = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "status" })?.value.flatMap(Int.init) ?? 200
             replyHandler(["url": "https://api.example.com/final", "redirected": true,
-                          "status": 200, "statusText": "OK", "headers": [:],
+                          "status": status, "statusText": "OK", "headers": [:],
                           "bodyBase64": "e30="], nil)
         }
     }
@@ -33,4 +36,26 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             XCTAssertEqual(result as? Int, 200, "handler: \(name)")
         }
     }
+    func testNullResponseBodies() async throws {
+        let controller = WKUserContentController()
+        let reply = Reply()
+        controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
+        let script = ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true)
+        controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController = controller
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let result = try await view.callAsyncJavaScript("""
+            for (const status of [204, 205, 304]) {
+                const response = await fetch(`https://api.example.com/?status=${status}`);
+                if (response.status !== status || response.body !== null) return false;
+            }
+            const head = await fetch('https://api.example.com/', { method: 'HEAD' });
+            return head.body === null;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
