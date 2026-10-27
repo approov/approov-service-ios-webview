@@ -410,6 +410,8 @@ package enum ApproovWebViewJavaScriptBridge {
 
       // Replace Fetch with a transparent native proxy. Page code still calls
       // `fetch(...)` as normal and receives a normal `Response`.
+      let nextRequestID = 0;
+      const allocateRequestID = () => `${Date.now()}-${++nextRequestID}-${Math.random().toString(36).slice(2)}`;
       window.fetch = async (input, init) => {
         const request = input instanceof Request && init === undefined
           ? input
@@ -424,13 +426,30 @@ package enum ApproovWebViewJavaScriptBridge {
             (typeof ReadableStream !== "undefined" && init?.body instanceof ReadableStream)) {
           throw new TypeError("This protected fetch option is not supported");
         }
-        const payload = await serializeRequest(
-          request,
-          "fetch",
-          "response",
-        );
-        const nativeResponse = await nativeHandler.postMessage(payload);
-        return makeFetchResponse(nativeResponse, request.method);
+        const requestId = allocateRequestID();
+        const signal = request.signal;
+        if (signal.aborted) throw signal.reason || new DOMException("Aborted", "AbortError");
+        let sent = false;
+        let onAbort;
+        const aborted = new Promise((_, reject) => {
+          onAbort = () => {
+            if (sent) {
+              Promise.resolve(nativeHandler.postMessage({ kind: "cancel", requestId })).catch(() => {});
+            }
+            reject(signal.reason || new DOMException("Aborted", "AbortError"));
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+        });
+        try {
+          const payload = await Promise.race([serializeRequest(request, "fetch", "response"), aborted]);
+          if (signal.aborted) throw signal.reason || new DOMException("Aborted", "AbortError");
+          payload.requestId = requestId;
+          sent = true;
+          const nativeResponse = await Promise.race([nativeHandler.postMessage(payload), aborted]);
+          return makeFetchResponse(nativeResponse, request.method);
+        } finally {
+          signal.removeEventListener("abort", onAbort);
+        }
       };
 
       const makeXHREvent = (type, detail = null) => {

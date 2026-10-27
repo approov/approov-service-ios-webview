@@ -118,4 +118,22 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testAlreadyAbortedFetchRejects() async throws {
+        let controller = WKUserContentController()
+        let reply = Reply()
+        controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
+        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController = controller
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let result = try await view.callAsyncJavaScript("""
+            const controller = new AbortController(); controller.abort();
+            try { await fetch('https://api.example.com/', {signal:controller.signal}); return false; }
+            catch (error) { return error.name === 'AbortError'; }
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
