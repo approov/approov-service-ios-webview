@@ -15,7 +15,7 @@ package enum ApproovWebViewJavaScriptBridge {
         xhrBridgeEnabled: Bool
     ) -> String {
         template
-            .replacingOccurrences(of: handlerPlaceholder, with: handlerName)
+            .replacingOccurrences(of: handlerPlaceholder, with: String(decoding: try! JSONEncoder().encode(handlerName), as: UTF8.self))
             .replacingOccurrences(
                 of: protectedEndpointsPlaceholder,
                 with: protectedEndpointsJSON(protectedEndpoints)
@@ -45,7 +45,7 @@ package enum ApproovWebViewJavaScriptBridge {
 
     private static let template = #"""
     (() => {
-      const nativeHandler = window.webkit?.messageHandlers?.__APPROOV_BRIDGE_HANDLER__;
+      const nativeHandler = window.webkit?.messageHandlers?.[__APPROOV_BRIDGE_HANDLER__];
       const protectedEndpoints = __APPROOV_PROTECTED_ENDPOINTS__;
       const xhrBridgeEnabled = __APPROOV_XHR_BRIDGE_ENABLED__;
       if (!nativeHandler || typeof nativeHandler.postMessage !== "function") {
