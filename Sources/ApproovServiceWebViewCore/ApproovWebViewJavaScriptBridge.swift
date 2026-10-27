@@ -16,18 +16,26 @@ package enum ApproovWebViewJavaScriptBridge {
         maxRequestBodyBytes: Int = 10 * 1024 * 1024,
         formBridgeEnabled: Bool = true
     ) -> String {
-        template
-            .replacingOccurrences(of: handlerPlaceholder, with: String(decoding: try! JSONEncoder().encode(handlerName), as: UTF8.self))
-            .replacingOccurrences(
-                of: protectedEndpointsPlaceholder,
-                with: protectedEndpointsJSON(protectedEndpoints)
-            )
-            .replacingOccurrences(
-                of: xhrBridgeEnabledPlaceholder,
-                with: xhrBridgeEnabled ? "true" : "false"
-            )
-            .replacingOccurrences(of: "__APPROOV_MAX_REQUEST_BODY_BYTES__", with: String(max(0, maxRequestBodyBytes)))
-            .replacingOccurrences(of: "__APPROOV_FORM_BRIDGE_ENABLED__", with: formBridgeEnabled ? "true" : "false")
+        let replacements = [
+            handlerPlaceholder: String(decoding: try! JSONEncoder().encode(handlerName), as: UTF8.self),
+            protectedEndpointsPlaceholder: protectedEndpointsJSON(protectedEndpoints),
+            xhrBridgeEnabledPlaceholder: xhrBridgeEnabled ? "true" : "false",
+            "__APPROOV_MAX_REQUEST_BODY_BYTES__": String(max(0, maxRequestBodyBytes)),
+            "__APPROOV_FORM_BRIDGE_ENABLED__": formBridgeEnabled ? "true" : "false",
+        ]
+        // Substitute the template once. Inserted names and endpoint strings
+        // must never be reinterpreted as additional template placeholders.
+        let expression = try! NSRegularExpression(pattern: replacements.keys.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|"))
+        let source = template as NSString
+        var output = ""
+        var offset = 0
+        for match in expression.matches(in: template, range: NSRange(location: 0, length: source.length)) {
+            output += source.substring(with: NSRange(location: offset, length: match.range.location - offset))
+            output += replacements[source.substring(with: match.range)]!
+            offset = NSMaxRange(match.range)
+        }
+        output += source.substring(from: offset)
+        return output
     }
 
     private static func protectedEndpointsJSON(

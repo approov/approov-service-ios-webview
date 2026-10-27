@@ -65,7 +65,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
     }
 
     func testPunctuationHandlerNamesInstallBridge() async throws {
-        for name in ["approov-test", "approov.test"] {
+        for name in ["approov-test", "approov.test", "__APPROOV_PROTECTED_ENDPOINTS__", "__APPROOV_FORM_BRIDGE_ENABLED__"] {
             let controller = WKUserContentController()
             let reply = Reply()
             controller.addScriptMessageHandler(reply, contentWorld: .page, name: name)
