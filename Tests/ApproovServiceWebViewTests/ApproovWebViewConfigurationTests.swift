@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ApproovServiceWebViewCore
 
 final class ApproovWebViewConfigurationTests: XCTestCase {

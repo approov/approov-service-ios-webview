@@ -9,7 +9,8 @@ import Foundation
 package final class ApproovWebViewRedirectDelegate:
     NSObject,
     URLSessionDataDelegate,
-    @unchecked Sendable {
+    @unchecked Sendable
+{
     private let lock = NSLock()
     private var proposedRequests: [Int: URLRequest] = [:]
     private struct Pending {
@@ -21,16 +22,20 @@ package final class ApproovWebViewRedirectDelegate:
     }
     private var pending: [Int: Pending] = [:]
 
-    package func register(taskID: Int, maximumBytes: Int,
-                          completion: @escaping (Result<(Data, URLResponse, URLRequest?), Error>) -> Void) {
+    package func register(
+        taskID: Int, maximumBytes: Int,
+        completion: @escaping (Result<(Data, URLResponse, URLRequest?), Error>) -> Void
+    ) {
         lock.lock()
         pending[taskID] = Pending(maximumBytes: max(0, maximumBytes), completion: completion)
         lock.unlock()
     }
 
-    package func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
-                            didReceive response: URLResponse,
-                            completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+    package func urlSession(
+        _ session: URLSession, dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
         lock.lock()
         var cancel = false
         if var item = pending[dataTask.taskIdentifier] {
@@ -40,7 +45,8 @@ package final class ApproovWebViewRedirectDelegate:
                 cancel = true
             }
             if let response = response as? HTTPURLResponse,
-               (response.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().hasPrefix("text/event-stream") {
+                (response.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().hasPrefix("text/event-stream")
+            {
                 cancel = true
             }
             pending[dataTask.taskIdentifier] = item
@@ -71,10 +77,17 @@ package final class ApproovWebViewRedirectDelegate:
         let redirect = proposedRequests.removeValue(forKey: task.taskIdentifier)
         lock.unlock()
         guard let item else { return }
-        if item.limitExceeded { item.completion(.failure(URLError(.dataLengthExceedsMaximum))); return }
-        if let error { item.completion(.failure(error)); return }
+        if item.limitExceeded {
+            item.completion(.failure(URLError(.dataLengthExceedsMaximum)))
+            return
+        }
+        if let error {
+            item.completion(.failure(error))
+            return
+        }
         guard let response = item.response ?? task.response else {
-            item.completion(.failure(URLError(.badServerResponse))); return
+            item.completion(.failure(URLError(.badServerResponse)))
+            return
         }
         item.completion(.success((item.data, response, redirect)))
     }

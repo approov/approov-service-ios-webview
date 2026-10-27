@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import ApproovServiceWebView
 
 final class ApproovWebViewTaskReferenceTests: XCTestCase {

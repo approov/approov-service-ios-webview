@@ -1,5 +1,6 @@
 import WebKit
 import XCTest
+
 @testable import ApproovServiceWebView
 
 final class ApproovWebViewFactoryTests: XCTestCase {
@@ -52,9 +53,11 @@ final class ApproovWebViewFactoryTests: XCTestCase {
             1
         )
 
-        XCTAssertThrowsError(try ApproovWebViewFactory.install(
-            on: webView, configuration: configuration
-        )) { error in
+        XCTAssertThrowsError(
+            try ApproovWebViewFactory.install(
+                on: webView, configuration: configuration
+            )
+        ) { error in
             XCTAssertEqual(error as? ApproovWebViewInstallationError, .alreadyInstalled)
         }
 
@@ -76,7 +79,8 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         let first = WKWebView(frame: .zero, configuration: firstConfiguration)
         let second = WKWebView(frame: .zero, configuration: secondConfiguration)
         try ApproovWebViewFactory.install(on: first, configuration: makeConfiguration())
-        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: second, configuration: makeConfiguration())) { error in
+        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: second, configuration: makeConfiguration())) {
+            error in
             XCTAssertEqual(error as? ApproovWebViewInstallationError, .contentControllerAlreadyInstalled)
         }
         XCTAssertEqual(controller.userScripts.count, 1)
@@ -88,7 +92,9 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         let coordinator = ApproovWebViewFactory.makeCoordinator(configuration: configuration)
         let first = try ApproovWebViewFactory.makeWebView(configuration: configuration, coordinator: coordinator)
         let second = WKWebView()
-        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: second, configuration: configuration, coordinator: coordinator)) { error in
+        XCTAssertThrowsError(
+            try ApproovWebViewFactory.install(on: second, configuration: configuration, coordinator: coordinator)
+        ) { error in
             XCTAssertEqual(error as? ApproovWebViewInstallationError, .coordinatorAlreadyAttached)
         }
         XCTAssertEqual(second.configuration.userContentController.userScripts.count, 0)
@@ -104,7 +110,8 @@ final class ApproovWebViewFactoryTests: XCTestCase {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = first.configuration.websiteDataStore
         let third = WKWebView(frame: .zero, configuration: config)
-        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: third, configuration: makeConfiguration())) { error in
+        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: third, configuration: makeConfiguration())) {
+            error in
             XCTAssertEqual(error as? ApproovWebViewInstallationError, .dataStoreAlreadyInUse)
         }
         XCTAssertEqual(third.configuration.userContentController.userScripts.count, 0)
@@ -113,17 +120,25 @@ final class ApproovWebViewFactoryTests: XCTestCase {
     @MainActor
     func testInvalidConfigurationIsRejectedBeforeWebKitMutation() throws {
         let configurations = [
-            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [], maximumConcurrentRequests: 0),
-            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [], maximumRequestBodyBytes: -1),
-            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [], approovTokenHeaderName: "bad\r\nheader"),
-            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: ["https://user:password@app.example.com"]),
-            ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: ["https://app.example.com/path"])
+            ApproovWebViewConfiguration(
+                approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [], maximumConcurrentRequests: 0),
+            ApproovWebViewConfiguration(
+                approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [], maximumRequestBodyBytes: -1),
+            ApproovWebViewConfiguration(
+                approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: [],
+                approovTokenHeaderName: "bad\r\nheader"),
+            ApproovWebViewConfiguration(
+                approovConfig: "fixture", protectedEndpoints: [],
+                allowedOrigins: ["https://user:password@app.example.com"]),
+            ApproovWebViewConfiguration(
+                approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: ["https://app.example.com/path"]),
         ]
         for configuration in configurations {
             let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
             XCTAssertThrowsError(try ApproovWebViewFactory.install(on: view, configuration: configuration)) { error in
                 guard let installationError = error as? ApproovWebViewInstallationError,
-                      case .invalidConfiguration = installationError else {
+                    case .invalidConfiguration = installationError
+                else {
                     return XCTFail("Expected configuration error, got \(error)")
                 }
             }
@@ -135,7 +150,9 @@ final class ApproovWebViewFactoryTests: XCTestCase {
     func testCoordinatorPolicyCannotDifferFromInstalledScriptPolicy() throws {
         let coordinator = ApproovWebViewFactory.makeCoordinator(configuration: makeConfiguration())
         let view = WKWebView()
-        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: view, configuration: makeConfiguration(), coordinator: coordinator)) { error in
+        XCTAssertThrowsError(
+            try ApproovWebViewFactory.install(on: view, configuration: makeConfiguration(), coordinator: coordinator)
+        ) { error in
             XCTAssertEqual(error as? ApproovWebViewInstallationError, .coordinatorConfigurationMismatch)
         }
         XCTAssertTrue(view.configuration.userContentController.userScripts.isEmpty)

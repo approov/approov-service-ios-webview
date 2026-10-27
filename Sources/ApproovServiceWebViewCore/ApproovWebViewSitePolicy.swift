@@ -6,11 +6,12 @@ import Foundation
 package enum ApproovWebViewSitePolicy {
     private static let rules: PublicSuffixRules? = {
         #if SWIFT_PACKAGE
-        guard let url = Bundle.module.url(forResource: "public_suffix_list", withExtension: "dat"),
-              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        return PublicSuffixRules(text: text)
+            guard let url = Bundle.module.url(forResource: "public_suffix_list", withExtension: "dat"),
+                let text = try? String(contentsOf: url, encoding: .utf8)
+            else { return nil }
+            return PublicSuffixRules(text: text)
         #else
-        return nil
+            return nil
         #endif
     }()
 
@@ -31,10 +32,13 @@ package enum ApproovWebViewSitePolicy {
 
     package static func sameSite(_ first: URL, _ second: URL) -> Bool {
         guard let firstScheme = first.scheme?.lowercased(), ["http", "https"].contains(firstScheme),
-              firstScheme == second.scheme?.lowercased(),
-              let firstHost = first.host?.lowercased(), let secondHost = second.host?.lowercased() else { return false }
+            firstScheme == second.scheme?.lowercased(),
+            let firstHost = first.host?.lowercased(), let secondHost = second.host?.lowercased()
+        else { return false }
         if firstHost == secondHost { return true }
-        guard let rules, let a = rules.registrableDomain(firstHost), let b = rules.registrableDomain(secondHost) else { return false }
+        guard let rules, let a = rules.registrableDomain(firstHost), let b = rules.registrableDomain(secondHost) else {
+            return false
+        }
         return a == b
     }
 
@@ -51,9 +55,13 @@ package enum ApproovWebViewSitePolicy {
                 let wild = line.hasPrefix("*.")
                 let plain = exception ? String(line.dropFirst()) : wild ? String(line.dropFirst(2)) : line
                 guard let host = URL(string: "https://" + plain)?.host?.lowercased() else { continue }
-                if exception { exceptions.insert(host) }
-                else if wild { wildcard.insert(host) }
-                else { exact.insert(host) }
+                if exception {
+                    exceptions.insert(host)
+                } else if wild {
+                    wildcard.insert(host)
+                } else {
+                    exact.insert(host)
+                }
             }
         }
 

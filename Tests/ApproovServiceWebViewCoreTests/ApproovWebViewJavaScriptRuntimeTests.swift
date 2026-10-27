@@ -1,5 +1,6 @@
-import XCTest
 import WebKit
+import XCTest
+
 @testable import ApproovServiceWebViewCore
 
 @MainActor
@@ -8,8 +9,12 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let completed: XCTestExpectation
         init(_ completed: XCTestExpectation) { self.completed = completed }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { completed.fulfill() }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { completed.fulfill() }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { completed.fulfill() }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            completed.fulfill()
+        }
+        func webView(
+            _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error
+        ) { completed.fulfill() }
     }
 
     private func load(_ view: WKWebView, html: String = "<html></html>") async {
@@ -21,15 +26,22 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         view.navigationDelegate = nil
     }
 
-    private func fixture(maxRequestBodyBytes: Int = 10 * 1024 * 1024, formBridgeEnabled: Bool = true, preScript: String = "", protectedEndpoints: [ApproovWebViewProtectedEndpoint] = [.init(host: "api.example.com", pathPrefix: "/")]) async -> WKWebView {
+    private func fixture(
+        maxRequestBodyBytes: Int = 10 * 1024 * 1024, formBridgeEnabled: Bool = true, preScript: String = "",
+        protectedEndpoints: [ApproovWebViewProtectedEndpoint] = [.init(host: "api.example.com", pathPrefix: "/")]
+    ) async -> WKWebView {
         let controller = WKUserContentController()
         controller.addScriptMessageHandler(Reply(), contentWorld: .page, name: "bridge")
         if !preScript.isEmpty {
-            controller.addUserScript(WKUserScript(source: preScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            controller.addUserScript(
+                WKUserScript(source: preScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
-        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(
-            handlerName: "bridge", protectedEndpoints: protectedEndpoints,
-            xhrBridgeEnabled: true, maxRequestBodyBytes: maxRequestBodyBytes, formBridgeEnabled: formBridgeEnabled), injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        controller.addUserScript(
+            WKUserScript(
+                source: ApproovWebViewJavaScriptBridge.scriptSource(
+                    handlerName: "bridge", protectedEndpoints: protectedEndpoints,
+                    xhrBridgeEnabled: true, maxRequestBodyBytes: maxRequestBodyBytes,
+                    formBridgeEnabled: formBridgeEnabled), injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
@@ -38,34 +50,57 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
     }
 
     private final class Reply: NSObject, WKScriptMessageHandlerWithReply {
-        func userContentController(_ userContentController: WKUserContentController,
-                                   didReceive message: WKScriptMessage,
-                                   replyHandler: @escaping (Any?, String?) -> Void) {
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage,
+            replyHandler: @escaping (Any?, String?) -> Void
+        ) {
             let payload = message.body as? [String: Any] ?? [:]
             if (payload["url"] as? String)?.contains("failure") == true {
                 replyHandler(nil, "fixture failure")
                 return
             }
             let url = payload["url"] as? String ?? ""
-            let status = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "status" })?.value.flatMap(Int.init) ?? 200
-            let delay = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "delay" })?.value.flatMap(Double.init) ?? 0
-            let responseBody = url.contains("/invalid-json") ? Data("invalid json".utf8).base64EncodedString() : url.contains("/echo")
-                ? (try? JSONSerialization.data(withJSONObject: payload))?.base64EncodedString() ?? "e30=" : "e30="
-            let body = url.contains("/empty") ? "" : url.contains("/xml") ? Data("<root>value</root>".utf8).base64EncodedString()
-                : url.contains("/latin1") ? Data([0x63, 0x61, 0x66, 0xe9]).base64EncodedString() : responseBody
-            let contentType = url.contains("/xml") ? "application/xml" : url.contains("/latin1") ? "text/plain;charset=windows-1252" : "application/json"
+            let status =
+                URLComponents(string: url)?.queryItems?.first(where: { $0.name == "status" })?.value.flatMap(Int.init)
+                ?? 200
+            let delay =
+                URLComponents(string: url)?.queryItems?.first(where: { $0.name == "delay" })?.value.flatMap(Double.init)
+                ?? 0
+            let responseBody =
+                url.contains("/invalid-json")
+                ? Data("invalid json".utf8).base64EncodedString()
+                : url.contains("/echo")
+                    ? (try? JSONSerialization.data(withJSONObject: payload))?.base64EncodedString() ?? "e30=" : "e30="
+            let body =
+                url.contains("/empty")
+                ? ""
+                : url.contains("/xml")
+                    ? Data("<root>value</root>".utf8).base64EncodedString()
+                    : url.contains("/latin1") ? Data([0x63, 0x61, 0x66, 0xe9]).base64EncodedString() : responseBody
+            let contentType =
+                url.contains("/xml")
+                ? "application/xml" : url.contains("/latin1") ? "text/plain;charset=windows-1252" : "application/json"
             let respond = {
-            replyHandler(["url": "https://api.example.com/final", "redirected": true,
-                          "status": status, "statusText": "OK", "headers": ["content-type": contentType],
-                          "bodyBase64": body], nil)
+                replyHandler(
+                    [
+                        "url": "https://api.example.com/final", "redirected": true,
+                        "status": status, "statusText": "OK", "headers": ["content-type": contentType],
+                        "bodyBase64": body,
+                    ], nil)
             }
-            if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000) { respond() } }
-            else { respond() }
+            if delay > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000) { respond() }
+            } else {
+                respond()
+            }
         }
     }
 
     func testPunctuationHandlerNamesInstallBridge() async throws {
-        for name in ["approov-test", "approov.test", "__APPROOV_PROTECTED_ENDPOINTS__", "__APPROOV_FORM_BRIDGE_ENABLED__"] {
+        for name in [
+            "approov-test", "approov.test", "__APPROOV_PROTECTED_ENDPOINTS__", "__APPROOV_FORM_BRIDGE_ENABLED__",
+        ] {
             let controller = WKUserContentController()
             let reply = Reply()
             controller.addScriptMessageHandler(reply, contentWorld: .page, name: name)
@@ -73,12 +108,15 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                 handlerName: name,
                 protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
                 xhrBridgeEnabled: true)
-            controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            controller.addUserScript(
+                WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
             let configuration = WKWebViewConfiguration()
             configuration.userContentController = controller
             let view = WKWebView(frame: .zero, configuration: configuration)
             await load(view)
-            let result = try await view.callAsyncJavaScript("const r = await fetch('https://api.example.com/test'); return r.status;", arguments: [:], in: nil, contentWorld: .page)
+            let result = try await view.callAsyncJavaScript(
+                "const r = await fetch('https://api.example.com/test'); return r.status;", arguments: [:], in: nil,
+                contentWorld: .page)
             XCTAssertEqual(result as? Int, 200, "handler: \(name)")
         }
     }
@@ -86,13 +124,16 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let controller = WKUserContentController()
         let reply = Reply()
         controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
-        let script = ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true)
+        let script = ApproovWebViewJavaScriptBridge.scriptSource(
+            handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
+            xhrBridgeEnabled: true)
         controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         await load(view)
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             for (const status of [204, 205, 304]) {
                 const response = await fetch(`https://api.example.com/?status=${status}`);
                 if (response.status !== status || response.body !== null) return false;
@@ -107,12 +148,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let controller = WKUserContentController()
         let reply = Reply()
         controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
-        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        controller.addUserScript(
+            WKUserScript(
+                source: ApproovWebViewJavaScriptBridge.scriptSource(
+                    handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
+                    xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         await load(view)
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const response = await fetch('https://api.example.com/test');
             const copy = response.clone();
             let immutable = false;
@@ -128,12 +174,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let controller = WKUserContentController()
         let reply = Reply()
         controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
-        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        controller.addUserScript(
+            WKUserScript(
+                source: ApproovWebViewJavaScriptBridge.scriptSource(
+                    handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
+                    xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         await load(view)
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const request = new Request('https://api.example.com/', {method:'POST', body:'body'});
             await fetch(request);
             try { await fetch(request); return false; }
@@ -146,12 +197,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let controller = WKUserContentController()
         let reply = Reply()
         controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
-        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        controller.addUserScript(
+            WKUserScript(
+                source: ApproovWebViewJavaScriptBridge.scriptSource(
+                    handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
+                    xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         await load(view)
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             for (const options of [{mode:'no-cors'}, {redirect:'manual'}, {integrity:'sha256-AAAA'}, {cache:'reload'}, {cache:'no-cache'}, {cache:'force-cache'}]) {
                 try { await fetch('https://api.example.com/', options); return false; }
                 catch (error) { if (!(error instanceof TypeError)) return false; }
@@ -165,12 +221,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let controller = WKUserContentController()
         let reply = Reply()
         controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
-        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        controller.addUserScript(
+            WKUserScript(
+                source: ApproovWebViewJavaScriptBridge.scriptSource(
+                    handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
+                    xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         await load(view)
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const controller = new AbortController(); controller.abort();
             try { await fetch('https://api.example.com/', {signal:controller.signal}); return false; }
             catch (error) { return error.name === 'AbortError'; }
@@ -182,12 +243,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let controller = WKUserContentController()
         let reply = Reply()
         controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
-        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        controller.addUserScript(
+            WKUserScript(
+                source: ApproovWebViewJavaScriptBridge.scriptSource(
+                    handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
+                    xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
         await load(view)
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             try { await fetch('https://api.example.com/failure'); return false; }
             catch (error) { return error instanceof TypeError; }
             """, arguments: [:], in: nil, contentWorld: .page)
@@ -196,7 +262,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testRequestBodyLimitRejectsBeforeNativeDispatch() async throws {
         let view = await fixture(maxRequestBodyBytes: 4)
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const exact = await fetch('https://api.example.com/', {method:'POST', body:'1234'});
             try { await fetch('https://api.example.com/', {method:'POST', body:'12345'}); return false; }
             catch (error) { return exact.status === 200 && error instanceof TypeError; }
@@ -206,7 +273,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRSendReturnsUndefined() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); xhr.open('GET', 'https://api.example.com/');
             const done = new Promise(resolve => xhr.onloadend = resolve);
             const result = xhr.send(); await done; return result === undefined;
@@ -216,7 +284,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRDuplicateSendThrowsSynchronously() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); xhr.open('GET', 'https://api.example.com/');
             const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send();
             let rejected = false;
@@ -228,7 +297,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRReopenIgnoresOldReply() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); let loads = 0; xhr.onload = () => loads++;
             xhr.open('GET', 'https://api.example.com/?status=201&delay=80'); xhr.send();
             await new Promise(resolve => setTimeout(resolve, 10));
@@ -242,7 +312,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRTimeoutIgnoresLateReply() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); const events = [];
             for (const type of ['timeout','load','error','loadend']) xhr.addEventListener(type, () => events.push(type));
             xhr.open('GET', 'https://api.example.com/?delay=80'); xhr.timeout = 10;
@@ -255,7 +326,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRValidatesOpenArguments() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             for (const method of ['bad method', 'TRACE', 'CONNECT', 'TRACK']) {
                 const xhr = new XMLHttpRequest();
                 try { xhr.open(method, 'https://api.example.com/'); return false; }
@@ -269,7 +341,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRHeadersCombineAndValidate() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); xhr.open('POST', 'https://api.example.com/echo');
             xhr.setRequestHeader('X-Test', ' one '); xhr.setRequestHeader('x-test', 'two');
             xhr.setRequestHeader('Cookie', 'secret'); let syntax = false;
@@ -283,7 +356,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRBodyTypesRetainGeneratedContentType() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const form = new FormData(); form.append('field','value');
             for (const body of [form, new URLSearchParams({field:'value'}), new Blob(['abc'],{type:'application/test'})]) {
                 const xhr = new XMLHttpRequest(); xhr.open('POST','https://api.example.com/echo');
@@ -301,7 +375,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRResponseConversionAndGetterErrors() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); xhr.open('GET','https://api.example.com/invalid-json');
             xhr.responseType = 'json'; let failed = false; xhr.onerror = () => failed = true;
             const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
@@ -316,7 +391,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRProgressLifecycleAndAbortStates() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); const events = []; let progress = false; let upload = false;
             for (const type of ['loadstart','progress','load','loadend']) xhr.addEventListener(type, event => {
                 events.push(type); if (type === 'progress') progress = event instanceof ProgressEvent && event.loaded === 2;
@@ -335,7 +411,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
     func testXHRUsesDocumentBaseURI() async throws {
         let view = await fixture()
         await load(view, html: "<html><head><base href='https://api.example.com/relative/'></head></html>")
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); xhr.open('GET','echo');
             const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
             return JSON.parse(xhr.responseText).url === 'https://api.example.com/relative/echo';
@@ -345,7 +422,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testDefaultPortRuleDoesNotCaptureOtherPorts() async throws {
         let view = await fixture(preScript: "window.fetch = async () => new Response('browser');")
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const native = await fetch('https://api.example.com:443/');
             const browser = await fetch('https://api.example.com:8443/');
             return await native.text() === '{}' && await browser.text() === 'browser';
@@ -355,7 +433,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testAmbiguousProtectedPathsRejectWithoutBrowserFallback() async throws {
         let view = await fixture(preScript: "window.fetch = async () => new Response('browser');")
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             for (const path of ['/private%2fpublic','/private%5cpublic','/private/%2e%2e/public','/invalid%zz']) {
                 try { await fetch('https://api.example.com' + path); return false; }
                 catch (error) { if (!(error instanceof TypeError)) return false; }
@@ -367,7 +446,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testSubmitListenersCanCancelAndMutateProtectedForms() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const cancelled = document.createElement('form'); cancelled.action = 'https://api.example.com/echo';
             cancelled.dataset.approovSubmitMode = 'response'; document.body.append(cancelled);
             let responses = 0; cancelled.addEventListener('approov:form-response', () => responses++);
@@ -386,7 +466,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testGETFormReplacesActionQuery() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             document.body.innerHTML = '<form action="https://api.example.com/echo?old=1"><input name="field" value="value"></form>';
             const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
             const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
@@ -397,7 +478,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testIframeNavigationFormFailsClearly() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const frame = document.createElement('iframe'); frame.srcdoc = '<form action="https://api.example.com/echo"></form>';
             const loaded = new Promise(resolve => frame.onload = resolve); document.body.append(frame); await loaded;
             const form = frame.contentDocument.querySelector('form');
@@ -409,7 +491,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testFormSubmitterOrderDisabledControlsAndImageCoordinates() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             async function submit(markup, selector) {
                 document.body.innerHTML = '<form method="post" action="https://api.example.com/echo">' + markup + '</form>';
                 const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
@@ -426,7 +509,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testInvalidFormMethodsUseGET() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             for (const method of ['HEAD', 'PUT', 'invalid']) {
                 document.body.innerHTML = '<form action="https://api.example.com/echo" method="' + method + '"><input name="field" value="value"></form>';
                 const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
@@ -442,7 +526,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
     func testFormHonorsBaseTargetAndExplicitSelfOverride() async throws {
         let view = await fixture()
         await load(view, html: "<html><head><base target='_blank'></head><body></body></html>")
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             document.body.innerHTML = '<form action="https://api.example.com/echo"></form>';
             const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
             const failed = new Promise(resolve => form.addEventListener('approov:form-error', event => resolve(event.detail.message), {once:true}));
@@ -456,7 +541,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testProgrammaticSubmitIgnoresCancelledClickSubmitter() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             document.body.innerHTML = '<form method="post" action="https://api.example.com/echo"><input name="field" value="value"><button name="stale" value="button" formaction="https://api.example.com/wrong">Go</button></form>';
             const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
             const button = form.querySelector('button'); button.addEventListener('click', event => event.preventDefault());
@@ -468,8 +554,13 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
     }
 
     func testFormSwitchLeavesNativeMethodsIntact() async throws {
-        let view = await fixture(formBridgeEnabled: false, preScript: "window.savedSubmit = HTMLFormElement.prototype.submit; window.savedRequestSubmit = HTMLFormElement.prototype.requestSubmit;")
-        let result = try await view.callAsyncJavaScript("""
+        let view = await fixture(
+            formBridgeEnabled: false,
+            preScript:
+                "window.savedSubmit = HTMLFormElement.prototype.submit; window.savedRequestSubmit = HTMLFormElement.prototype.requestSubmit;"
+        )
+        let result = try await view.callAsyncJavaScript(
+            """
             return !window.__approovBridgeFeatures.forms && window.__approovBridgeFeatures.fetch &&
                 HTMLFormElement.prototype.submit === window.savedSubmit &&
                 HTMLFormElement.prototype.requestSubmit === window.savedRequestSubmit &&
@@ -480,7 +571,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testFetchHeadersRejectPrototypeAndCallbackMutation() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const response = await fetch('https://api.example.com/'); let prototypeRejected = false; let callbackRejected = false;
             try { Headers.prototype.set.call(response.headers,'x-test','value'); }
             catch(error) { prototypeRejected = error instanceof TypeError; }
@@ -496,7 +588,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testInlineAndPropagationCancellationPreventsNativeSubmission() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const outcomes = [];
             for (const mode of ['inline','window-inline','stopped-inline','capture','bubble']) {
                 document.body.innerHTML = '<form action="https://api.example.com/echo"></form>';
@@ -512,12 +605,15 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             }
             return outcomes;
             """, arguments: [:], in: nil, contentWorld: .page)
-        XCTAssertEqual(result as? [String], ["inline:0", "window-inline:0", "stopped-inline:0", "capture:0", "bubble:0"], "Per-variant cancellation results: \(String(describing: result))")
+        XCTAssertEqual(
+            result as? [String], ["inline:0", "window-inline:0", "stopped-inline:0", "capture:0", "bubble:0"],
+            "Per-variant cancellation results: \(String(describing: result))")
     }
 
     func testClosedShadowFormsFailClearly() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const host = document.createElement('div'); document.body.append(host);
             const root = host.attachShadow({mode:'closed'}); root.innerHTML = '<form action="https://api.example.com/echo"></form>';
             const form = root.querySelector('form'); form.dataset.approovSubmitMode = 'response';
@@ -529,7 +625,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRPropagatesCredentialModeAndRejectsLateChanges() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); xhr.open('GET','https://api.example.com/echo'); xhr.withCredentials = true;
             const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); let rejected = false;
             try { xhr.withCredentials = false; } catch(error) { rejected = error.name === 'InvalidStateError'; }
@@ -541,7 +638,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testNativeToProtectedXHRReopenTerminatesOldTransport() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); let loads = 0; xhr.onload = () => loads++;
             xhr.open('GET','data:text/plain,old'); xhr.send();
             xhr.open('GET','https://api.example.com/');
@@ -554,7 +652,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRCharsetXMLArrayBufferAndMIMEOverride() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             async function request(path, type = '', mime = null) {
                 const xhr = new XMLHttpRequest(); xhr.open('GET','https://api.example.com/' + path); xhr.responseType = type;
                 if (mime) xhr.overrideMimeType(mime);
@@ -575,7 +674,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testProtectedXHRLifecycleMatchesNativeWebKit() async throws {
         let view = await fixture(preScript: "window.NativeXHR = window.XMLHttpRequest;")
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             async function lifecycle(Constructor, url, abort) {
                 const xhr = new Constructor(); const events = []; let valid = true;
                 for (const type of ['loadstart','progress','load','abort','error','loadend']) xhr.addEventListener(type, event => {
@@ -601,10 +701,13 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
     }
 
     func testCanonicalConfigurationTrimsPathPrefixAndExclusions() async throws {
-        let view = await fixture(preScript: "window.fetch = async () => new Response('browser');", protectedEndpoints: [
-            .init(host: "api.example.com", pathPrefix: "/v1/", excludedPathPrefixes: ["/v1/assets/"])
-        ])
-        let result = try await view.callAsyncJavaScript("""
+        let view = await fixture(
+            preScript: "window.fetch = async () => new Response('browser');",
+            protectedEndpoints: [
+                .init(host: "api.example.com", pathPrefix: "/v1/", excludedPathPrefixes: ["/v1/assets/"])
+            ])
+        let result = try await view.callAsyncJavaScript(
+            """
             const protectedResult = await fetch('https://api.example.com/v1/child');
             const excluded = await fetch('https://api.example.com/v1/assets/child');
             return await protectedResult.text() === '{}' && await excluded.text() === 'browser';
@@ -614,7 +717,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRPreservesNativeArityAndDOMStringErrors() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest();
             for (const operation of [() => xhr.open(), () => xhr.setRequestHeader(), () => xhr.getResponseHeader(), () => xhr.overrideMimeType()]) {
                 try { operation(); return false; } catch(error) { if (!(error instanceof TypeError)) return false; }
@@ -628,7 +732,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testSubmitterFormDataEventWithRepeatedNamesAndDuplicateFormIDs() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             document.body.innerHTML = '<form id="same"></form><form id="same" method="post" action="https://api.example.com/echo"><input name="field" value="before"><button name="field" value="button">Go</button><input name="field" value="after"></form>';
             const form = document.forms[1]; form.dataset.approovSubmitMode = 'response'; let observed = '';
             form.addEventListener('formdata', event => observed = event.formData.getAll('field').join(','));
@@ -641,7 +746,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testPrototypeEventMethodsHonorProtectedSubmitCancellation() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const outcomes = []; const cachedPreventDefault = Event.prototype.preventDefault;
             for (const mode of ['prototype', 'cached', 'immediate']) {
                 document.body.innerHTML = '<form action="https://api.example.com/echo"></form>';
@@ -663,12 +769,15 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             let brand = false; try { Event.prototype.preventDefault.call({}); } catch(error) { brand = error instanceof TypeError; }
             outcomes.push('ordinary:' + (ordinary.defaultPrevented && brand)); return outcomes;
             """, arguments: [:], in: nil, contentWorld: .page)
-        XCTAssertEqual(result as? [String], ["prototype:0", "cached:0", "immediate:0", "stopped:field=after", "ordinary:true"], "Event method outcomes: \(String(describing: result))")
+        XCTAssertEqual(
+            result as? [String], ["prototype:0", "cached:0", "immediate:0", "stopped:field=after", "ordinary:true"],
+            "Event method outcomes: \(String(describing: result))")
     }
 
     func testXHRTextBodiesUseUTF8ForExplicitCharset() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); xhr.open('POST','https://api.example.com/echo');
             xhr.setRequestHeader('content-type','text/plain;charset=windows-1252');
             const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send('café'); await done;
@@ -681,7 +790,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRBodyConversionErrorsThrowSynchronously() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const xhr = new XMLHttpRequest(); xhr.open('POST','https://api.example.com/');
             for (const body of [Symbol('body'), {toString(){throw new TypeError('fixture conversion');}}]) {
                 try { xhr.send(body); return false; } catch(error) { if (!(error instanceof TypeError)) return false; }
@@ -694,7 +804,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testXHRExtractsBodyBeforeLoadStartHandlers() async throws {
         let view = await fixture()
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const body = new FormData(); body.append('field', 'before');
             const xhr = new XMLHttpRequest(); xhr.open('POST','https://api.example.com/echo');
             xhr.onloadstart = () => body.set('field', 'after');
@@ -707,7 +818,8 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
 
     func testNativeCaptureStopSkipsLaterInlineSubmitHandler() async throws {
         let view = await fixture(preScript: "window.nativeStopPropagation = Event.prototype.stopPropagation;")
-        let result = try await view.callAsyncJavaScript("""
+        let result = try await view.callAsyncJavaScript(
+            """
             const form = document.createElement('form'); form.action = 'about:blank'; document.body.append(form);
             let inlineCalled = false; form.onsubmit = () => { inlineCalled = true; return false; };
             form.addEventListener('submit', event => window.nativeStopPropagation.call(event), true);
@@ -716,7 +828,9 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             return {inlineCalled, prevented:event.defaultPrevented, uncancelled};
             """, arguments: [:], in: nil, contentWorld: .page)
         let outcome = result as? [String: Bool]
-        XCTAssertEqual(outcome, ["inlineCalled": false, "prevented": false, "uncancelled": true], "Native target phase outcome: \(String(describing: result))")
+        XCTAssertEqual(
+            outcome, ["inlineCalled": false, "prevented": false, "uncancelled": true],
+            "Native target phase outcome: \(String(describing: result))")
     }
 
 }

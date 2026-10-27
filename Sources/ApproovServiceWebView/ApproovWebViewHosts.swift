@@ -11,7 +11,10 @@ public final class ApproovWebViewContainer: UIView {
 
     func update(content: ApproovWebViewContent, configuration: ApproovWebViewConfiguration, onError: (Error) -> Void) {
         if currentConfigurationID == configuration.installationID,
-           let currentContent, Self.sameContent(currentContent, content) { return }
+            let currentContent, Self.sameContent(currentContent, content)
+        {
+            return
+        }
         if let webView { ApproovWebViewFactory.invalidate(on: webView) }
         webView?.removeFromSuperview()
         webView = nil
@@ -47,9 +50,9 @@ public final class ApproovWebViewContainer: UIView {
 
     private static func sameContent(_ lhs: ApproovWebViewContent, _ rhs: ApproovWebViewContent) -> Bool {
         switch (lhs, rhs) {
-        case let (.htmlString(a, b), .htmlString(c, d)): return a == c && b == d
-        case let (.fileURL(a, b), .fileURL(c, d)): return a == c && b == d
-        case let (.request(a), .request(b)): return a == b
+        case (.htmlString(let a, let b), .htmlString(let c, let d)): return a == c && b == d
+        case (.fileURL(let a, let b), .fileURL(let c, let d)): return a == c && b == d
+        case (.request(let a), .request(let b)): return a == b
         default: return false
         }
     }
@@ -61,8 +64,10 @@ public struct ApproovWebView: UIViewRepresentable {
     public let configuration: ApproovWebViewConfiguration
     public let onError: (Error) -> Void
 
-    public init(content: ApproovWebViewContent, configuration: ApproovWebViewConfiguration,
-                onError: @escaping (Error) -> Void = { _ in }) {
+    public init(
+        content: ApproovWebViewContent, configuration: ApproovWebViewConfiguration,
+        onError: @escaping (Error) -> Void = { _ in }
+    ) {
         self.content = content
         self.configuration = configuration
         self.onError = onError
@@ -89,8 +94,10 @@ public final class ApproovWebViewController: UIViewController {
     private let configuration: ApproovWebViewConfiguration
     private let onError: (Error) -> Void
 
-    public init(content: ApproovWebViewContent, configuration: ApproovWebViewConfiguration,
-                onError: @escaping (Error) -> Void = { _ in }) {
+    public init(
+        content: ApproovWebViewContent, configuration: ApproovWebViewConfiguration,
+        onError: @escaping (Error) -> Void = { _ in }
+    ) {
         self.content = content
         self.configuration = configuration
         self.onError = onError

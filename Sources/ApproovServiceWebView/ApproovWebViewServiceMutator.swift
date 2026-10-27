@@ -232,7 +232,8 @@ final class ApproovWebViewServiceMutator: ApproovServiceMutator {
 
     func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool {
         if let scopePolicy = Self.scopePolicy(for: request),
-           !isAllowedWebViewRequest(request, policy: scopePolicy) {
+            !isAllowedWebViewRequest(request, policy: scopePolicy)
+        {
             scopePolicy.logger.debug(
                 "Skipping pinning outside WebView protected allowlist: \(request.logDescription)"
             )

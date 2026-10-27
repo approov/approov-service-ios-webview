@@ -18,7 +18,8 @@ package enum ApproovWebViewBrowserPolicyError: Error, LocalizedError {
 package enum ApproovWebViewBrowserPolicy {
     package static func origin(of url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
-              let host = url.host?.lowercased() else { return nil }
+            let host = url.host?.lowercased()
+        else { return nil }
         let defaultPort = scheme == "https" ? 443 : 80
         let suffix = url.port.flatMap { $0 == defaultPort ? nil : ":\($0)" } ?? ""
         let formattedHost = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
@@ -29,37 +30,47 @@ package enum ApproovWebViewBrowserPolicy {
         origin(of: url) != sourceOrigin
     }
 
-    package static func validateOptions(mode: String, credentials: String, redirect: String,
-                                        cache: String, integrity: String) throws {
+    package static func validateOptions(
+        mode: String, credentials: String, redirect: String,
+        cache: String, integrity: String
+    ) throws {
         guard ["cors", "same-origin", "navigate"].contains(mode),
-              ["omit", "same-origin", "include"].contains(credentials),
-              ["follow", "error"].contains(redirect),
-              ["default", "no-store"].contains(cache),
-              integrity.isEmpty else { throw ApproovWebViewBrowserPolicyError.unsupportedPolicy }
+            ["omit", "same-origin", "include"].contains(credentials),
+            ["follow", "error"].contains(redirect),
+            ["default", "no-store"].contains(cache),
+            integrity.isEmpty
+        else { throw ApproovWebViewBrowserPolicyError.unsupportedPolicy }
     }
 
     package static func validateMethod(_ method: String) throws -> String {
-        let tokenCharacters = CharacterSet(charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        let tokenCharacters = CharacterSet(
+            charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
         guard !method.isEmpty, method.unicodeScalars.allSatisfy({ tokenCharacters.contains($0) }),
-              !["CONNECT", "TRACE", "TRACK"].contains(method.uppercased()) else {
+            !["CONNECT", "TRACE", "TRACK"].contains(method.uppercased())
+        else {
             throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
         }
-        return ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"].contains(method.uppercased()) ? method.uppercased() : method
+        return ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"].contains(method.uppercased())
+            ? method.uppercased() : method
     }
 
     package static func validatePageHeaders(_ headers: [String: String], tokenHeader: String) throws {
-        let forbidden: Set<String> = ["accept-charset", "accept-encoding", "access-control-request-headers",
+        let forbidden: Set<String> = [
+            "accept-charset", "accept-encoding", "access-control-request-headers",
             "access-control-request-method", "connection", "content-length", "cookie", "cookie2", "date",
             "dnt", "expect", "host", "keep-alive", "origin", "referer", "set-cookie", "te", "trailer",
-            "transfer-encoding", "upgrade", "via", tokenHeader.lowercased()]
-        let tokenCharacters = CharacterSet(charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            "transfer-encoding", "upgrade", "via", tokenHeader.lowercased(),
+        ]
+        let tokenCharacters = CharacterSet(
+            charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
         var seen = Set<String>()
         for (name, value) in headers {
             let lower = name.lowercased()
             guard seen.insert(lower).inserted else { throw ApproovWebViewBrowserPolicyError.invalidHeader }
             guard !name.isEmpty, name.unicodeScalars.allSatisfy({ tokenCharacters.contains($0) }),
-                  !value.unicodeScalars.contains(where: { $0.value == 0 || $0.value == 10 || $0.value == 13 }),
-                  !forbidden.contains(lower), !lower.hasPrefix("sec-"), !lower.hasPrefix("proxy-") else {
+                !value.unicodeScalars.contains(where: { $0.value == 0 || $0.value == 10 || $0.value == 13 }),
+                !forbidden.contains(lower), !lower.hasPrefix("sec-"), !lower.hasPrefix("proxy-")
+            else {
                 throw ApproovWebViewBrowserPolicyError.invalidHeader
             }
         }
@@ -69,8 +80,10 @@ package enum ApproovWebViewBrowserPolicy {
         mode == "include" || (mode == "same-origin" && !isCrossOrigin(url, sourceOrigin: sourceOrigin))
     }
 
-    package static func referrer(pageURL: URL, sourceOrigin: String, destination: URL,
-                                requestedReferrer: String?, policy: String?) throws -> String? {
+    package static func referrer(
+        pageURL: URL, sourceOrigin: String, destination: URL,
+        requestedReferrer: String?, policy: String?
+    ) throws -> String? {
         if requestedReferrer == "" || requestedReferrer == "no-referrer" { return nil }
         var source = pageURL
         if let requestedReferrer, requestedReferrer != "about:client" {
@@ -80,8 +93,11 @@ package enum ApproovWebViewBrowserPolicy {
             source = requested
         }
         guard var components = URLComponents(url: source, resolvingAgainstBaseURL: false),
-              origin(of: source) == sourceOrigin else { return nil }
-        components.user = nil; components.password = nil; components.fragment = nil
+            origin(of: source) == sourceOrigin
+        else { return nil }
+        components.user = nil
+        components.password = nil
+        components.fragment = nil
         let full = components.string
         let crossOrigin = isCrossOrigin(destination, sourceOrigin: sourceOrigin)
         let downgrade = source.scheme?.lowercased() == "https" && destination.scheme?.lowercased() != "https"
@@ -118,31 +134,41 @@ package enum ApproovWebViewBrowserPolicy {
         }
     }
 
-    package static func checkPreflight(status: Int, headers: [String: String], sourceOrigin: String,
-                                       credentials: String, method: String, requestHeaders: [String: String]) throws {
+    package static func checkPreflight(
+        status: Int, headers: [String: String], sourceOrigin: String,
+        credentials: String, method: String, requestHeaders: [String: String]
+    ) throws {
         guard (200..<300).contains(status) else { throw ApproovWebViewBrowserPolicyError.corsRejected }
         try checkCORS(headers: headers, sourceOrigin: sourceOrigin, credentials: credentials)
         let headers = lowercased(headers)
         let methods = tokens(headers["access-control-allow-methods"])
         let allowedHeaders = Set(tokens(headers["access-control-allow-headers"]).map { $0.lowercased() })
-        guard ["GET", "HEAD", "POST"].contains(method) || methods.contains(method)
-                || (methods.contains("*") && credentials != "include") else {
+        guard
+            ["GET", "HEAD", "POST"].contains(method) || methods.contains(method)
+                || (methods.contains("*") && credentials != "include")
+        else {
             throw ApproovWebViewBrowserPolicyError.corsRejected
         }
         for name in unsafeHeaderNames(requestHeaders) {
-            guard allowedHeaders.contains(name)
-                    || (allowedHeaders.contains("*") && credentials != "include" && name != "authorization") else {
+            guard
+                allowedHeaders.contains(name)
+                    || (allowedHeaders.contains("*") && credentials != "include" && name != "authorization")
+            else {
                 throw ApproovWebViewBrowserPolicyError.corsRejected
             }
         }
     }
 
-    package static func exposedHeaders(_ headers: [String: String], crossOrigin: Bool,
-                                       credentials: String) -> [String: String] {
+    package static func exposedHeaders(
+        _ headers: [String: String], crossOrigin: Bool,
+        credentials: String
+    ) -> [String: String] {
         let normalized = lowercased(headers)
         let exposed = Set(tokens(normalized["access-control-expose-headers"]).map { $0.lowercased() })
-        let safelist: Set<String> = ["cache-control", "content-language", "content-length", "content-type",
-                                    "expires", "last-modified", "pragma"]
+        let safelist: Set<String> = [
+            "cache-control", "content-language", "content-length", "content-type",
+            "expires", "last-modified", "pragma",
+        ]
         return headers.filter { name, _ in
             let name = name.lowercased()
             guard name != "set-cookie", name != "set-cookie2" else { return false }
@@ -154,8 +180,11 @@ package enum ApproovWebViewBrowserPolicy {
     private static func lowercased(_ headers: [String: String]) -> [String: String] {
         headers.reduce(into: [:]) { result, entry in
             let name = entry.key.lowercased()
-            if let previous = result[name] { result[name] = previous + "," + entry.value }
-            else { result[name] = entry.value }
+            if let previous = result[name] {
+                result[name] = previous + "," + entry.value
+            } else {
+                result[name] = entry.value
+            }
         }
     }
 
@@ -172,8 +201,10 @@ package enum ApproovWebViewBrowserPolicy {
         case "accept-language", "content-language":
             return value.range(of: "^[0-9A-Za-z *,.;=\\-]*$", options: .regularExpression) != nil
         case "content-type":
-            let essence = value.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
-            return !hasUnsafe && ["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"].contains(essence)
+            let essence =
+                value.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            return !hasUnsafe
+                && ["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"].contains(essence)
         case "range": return value.range(of: "^bytes=[0-9]+-[0-9]*$", options: .regularExpression) != nil
         default: return false
         }

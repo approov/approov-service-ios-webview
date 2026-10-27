@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ApproovServiceWebView
 @testable import ApproovServiceWebViewCore
 
@@ -13,7 +14,8 @@ final class ApproovWebViewURLPolicyTests: XCTestCase {
     }
 
     func testEncodedUnreservedExclusionMatchesBrowserPolicy() {
-        let endpoint = ApproovWebViewProtectedEndpoint(host: "shop.example.com", pathPrefix: "/",
+        let endpoint = ApproovWebViewProtectedEndpoint(
+            host: "shop.example.com", pathPrefix: "/",
             excludedPathPrefixes: ["/lh/statics", "/cdn-cgi"])
         for path in ["/lh/statics/a", "/lh/%73tatics/a", "/cdn%2dcgi/a"] {
             XCTAssertFalse(endpoint.matches(URL(string: "https://shop.example.com" + path)!))

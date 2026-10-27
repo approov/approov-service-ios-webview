@@ -24,8 +24,10 @@ final class ApproovWebViewBootstrap: @unchecked Sendable {
     private var configured: Configuration?
     private var hookCompleted = false
 
-    func install(_ requested: Configuration, service: Service,
-                 configure: () throws -> Void, installScope: () -> Void) throws {
+    func install(
+        _ requested: Configuration, service: Service,
+        configure: () throws -> Void, installScope: () -> Void
+    ) throws {
         lock.lock()
         defer { lock.unlock() }
         if let configured, configured != requested { throw ApproovWebViewInitializationError.incompatibleConfiguration }

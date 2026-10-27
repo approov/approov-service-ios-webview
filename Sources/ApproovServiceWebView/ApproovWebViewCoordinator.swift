@@ -16,9 +16,13 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     var configurationID: UUID { configuration.installationID }
     private var executor: ApproovWebViewRequestExecutor?
     private var didWarnAboutMissingOriginAllowlist = false
-    typealias Execution = (ApproovWebViewProxyRequest, ApproovWebViewRequestContext) async throws -> ApproovWebViewExecutionResult
+    typealias Execution = (ApproovWebViewProxyRequest, ApproovWebViewRequestContext) async throws ->
+        ApproovWebViewExecutionResult
     private var executionOverride: Execution?
-    private struct RequestKey: Hashable { let origin: String; let requestID: String }
+    private struct RequestKey: Hashable {
+        let origin: String
+        let requestID: String
+    }
     private struct PendingRequest {
         let token: UUID
         let task: Task<Void, Never>
@@ -99,12 +103,14 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
             replyHandler(nil, "This origin is not allowed to use the Approov WebView bridge.")
             return
         }
-        guard let context = Self.requestContext(
-            frameURL: message.frameInfo.request.url,
-            frameOrigin: Self.originString(from: message.frameInfo.securityOrigin),
-            mainDocumentURL: webView?.url,
-            isMainFrame: message.frameInfo.isMainFrame
-        ) else {
+        guard
+            let context = Self.requestContext(
+                frameURL: message.frameInfo.request.url,
+                frameOrigin: Self.originString(from: message.frameInfo.securityOrigin),
+                mainDocumentURL: webView?.url,
+                isMainFrame: message.frameInfo.isMainFrame
+            )
+        else {
             replyHandler(nil, "The sending frame has no supported browser origin.")
             return
         }
@@ -181,8 +187,9 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     /// complete URLs or request data. Only fixed bridge messages reach logs or JS.
     static func safeErrorMessage(_ error: Error) -> String {
         let nativeError = error as NSError
-        if error is CancellationError ||
-            (nativeError.domain == NSURLErrorDomain && nativeError.code == NSURLErrorCancelled) {
+        if error is CancellationError
+            || (nativeError.domain == NSURLErrorDomain && nativeError.code == NSURLErrorCancelled)
+        {
             return cancelledMessage
         }
         guard let bridgeError = error as? ApproovWebViewBridgeError else {
@@ -206,15 +213,19 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
     /// Reject nested/unknown values before JSONSerialization makes another copy.
     static func isBoundedPayload(_ body: [String: Any], maximumBodyBytes: Int) -> Bool {
-        let stringFields: Set<String> = ["url", "method", "sourcePageURL", "responseHandling", "requestSource",
-            "requestId", "credentials", "mode", "redirect", "cache", "integrity", "referrer", "referrerPolicy"]
+        let stringFields: Set<String> = [
+            "url", "method", "sourcePageURL", "responseHandling", "requestSource",
+            "requestId", "credentials", "mode", "redirect", "cache", "integrity", "referrer", "referrerPolicy",
+        ]
         guard body.count <= stringFields.count + 2, maximumBodyBytes >= 0 else { return false }
         for (name, value) in body {
             if name == "headers" {
                 guard let headers = value as? [String: Any], headers.count <= 128 else { return false }
                 var bytes = 0
                 for (key, value) in headers {
-                    guard let value = value as? String, key.utf8.count <= 256, value.utf8.count <= 64 * 1024 else { return false }
+                    guard let value = value as? String, key.utf8.count <= 256, value.utf8.count <= 64 * 1024 else {
+                        return false
+                    }
                     bytes += key.utf8.count + value.utf8.count
                     guard bytes <= 64 * 1024 else { return false }
                 }
@@ -222,7 +233,9 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                 if value is NSNull { continue }
                 let (base, overflow) = (maximumBodyBytes / 3).multipliedReportingOverflow(by: 4)
                 let (limit, remainderOverflow) = base.addingReportingOverflow(maximumBodyBytes % 3 == 0 ? 0 : 4)
-                guard !overflow, !remainderOverflow, let text = value as? String, text.utf8.count <= limit else { return false }
+                guard !overflow, !remainderOverflow, let text = value as? String, text.utf8.count <= limit else {
+                    return false
+                }
             } else {
                 guard stringFields.contains(name) else { return false }
                 if value is NSNull { continue }
@@ -258,9 +271,9 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
                 guard let self, let pending = self.takeRequest(key, token: token) else { return }
                 do {
                     switch result {
-                    case let .response(response):
+                    case .response(let response):
                         pending.replyHandler(try self.makeReplyObject(from: response), nil)
-                    case let .navigation(navigation):
+                    case .navigation(let navigation):
                         try self.applyNavigationLoad(navigation)
                         pending.replyHandler(["navigationStarted": true], nil)
                     }
@@ -325,7 +338,8 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         frameURL: URL?, frameOrigin: String, mainDocumentURL: URL?, isMainFrame: Bool
     ) -> ApproovWebViewRequestContext? {
         guard let originURL = URL(string: frameOrigin),
-              let origin = normalizedOrigin(originURL) else { return nil }
+            let origin = normalizedOrigin(originURL)
+        else { return nil }
         let verifiedURL: URL
         if let frameURL, normalizedOrigin(frameURL) == origin {
             verifiedURL = frameURL
@@ -340,8 +354,9 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
 
     private static func normalizedOrigin(_ url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(),
-              scheme == "https" || scheme == "http",
-              let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+            scheme == "https" || scheme == "http",
+            let host = url.host?.lowercased(), !host.isEmpty
+        else { return nil }
         var components = URLComponents()
         components.scheme = scheme
         components.host = host
@@ -361,7 +376,8 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         replyHandler: @escaping (Any?, String?) -> Void
     ) -> Bool {
         guard let kind = bodyDictionary["kind"] as? String,
-              kind == "diagnostic" else {
+            kind == "diagnostic"
+        else {
             return false
         }
 
@@ -369,7 +385,8 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         switch event {
         case "unprotected-request-bypass":
             let suppliedSource = bodyDictionary["requestSource"] as? String ?? ""
-            let requestSource = ["fetch", "xhr", "form"].contains(suppliedSource) ? suppliedSource.uppercased() : "UNKNOWN"
+            let requestSource =
+                ["fetch", "xhr", "form"].contains(suppliedSource) ? suppliedSource.uppercased() : "UNKNOWN"
             let url = bodyDictionary["url"] as? String ?? "<missing-url>"
             logger.debug(
                 """

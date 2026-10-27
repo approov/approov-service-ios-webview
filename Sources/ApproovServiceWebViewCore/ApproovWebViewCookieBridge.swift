@@ -18,7 +18,8 @@ package protocol ApproovWebViewCookieStoreAdapter: AnyObject {
 @available(macOS 10.15, *)
 @MainActor
 private final class WebKitCookieStoreAdapter:
-    ApproovWebViewCookieStoreAdapter {
+    ApproovWebViewCookieStoreAdapter
+{
     private let store: WKHTTPCookieStore
 
     init(store: WKHTTPCookieStore) {

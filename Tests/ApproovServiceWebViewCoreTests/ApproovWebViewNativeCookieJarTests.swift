@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import ApproovServiceWebViewCore
 
 final class ApproovWebViewNativeCookieJarTests: XCTestCase {
@@ -12,9 +13,11 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         XCTAssertFalse(jar.sessionConfiguration.httpShouldSetCookies)
         XCTAssertEqual(jar.sessionConfiguration.httpCookieAcceptPolicy, .never)
 
-        synchronize(jar, fromWebKit: [
-            makeCookie(name: "session", value: "abc123")
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(name: "session", value: "abc123")
+            ])
 
         XCTAssertEqual(jar.allCookies.map(\.value), ["abc123"])
     }
@@ -37,10 +40,12 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
     func testPrepareDisablesAutomaticHandlingAndAppliesManualCookieHeader() throws {
         let jar = try ApproovWebViewNativeCookieJar()
-        synchronize(jar, fromWebKit: [
-            makeCookie(name: "session", value: "abc123"),
-            makeCookie(name: "csrf", value: "token456")
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(name: "session", value: "abc123"),
+                makeCookie(name: "csrf", value: "token456"),
+            ])
         var request = URLRequest(url: apiURL)
 
         jar.prepare(&request, for: apiURL)
@@ -55,9 +60,11 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
     func testPreparePreservesExplicitCookieHeader() throws {
         let jar = try ApproovWebViewNativeCookieJar()
-        synchronize(jar, fromWebKit: [
-            makeCookie(name: "session", value: "native")
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(name: "session", value: "native")
+            ])
         var request = URLRequest(url: apiURL)
         request.setValue("explicit=value", forHTTPHeaderField: "Cookie")
 
@@ -72,18 +79,20 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
     func testPrepareRedirectRebuildsCookieHeaderForDestination() throws {
         let jar = try ApproovWebViewNativeCookieJar()
-        synchronize(jar, fromWebKit: [
-            makeCookie(
-                name: "source",
-                value: "secret",
-                domain: "api.example.com"
-            ),
-            makeCookie(
-                name: "destination",
-                value: "allowed",
-                domain: "login.example.net"
-            )
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(
+                    name: "source",
+                    value: "secret",
+                    domain: "api.example.com"
+                ),
+                makeCookie(
+                    name: "destination",
+                    value: "allowed",
+                    domain: "login.example.net"
+                ),
+            ])
         let destinationURL = URL(
             string: "https://login.example.net/complete"
         )!
@@ -168,10 +177,12 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
     func testFlushDoesNotReplayCookiesImportedFromWebKit() throws {
         let jar = try ApproovWebViewNativeCookieJar()
-        synchronize(jar, fromWebKit: [
-            makeCookie(name: "session", value: "authenticated"),
-            makeCookie(name: "preference", value: "compact")
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(name: "session", value: "authenticated"),
+                makeCookie(name: "preference", value: "compact"),
+            ])
 
         let flush = jar.makeWebKitFlush()
 
@@ -181,10 +192,12 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
     func testFlushContainsOnlyPendingResponseCookieDeltas() throws {
         let jar = try ApproovWebViewNativeCookieJar()
-        synchronize(jar, fromWebKit: [
-            makeCookie(name: "session", value: "old"),
-            makeCookie(name: "preference", value: "compact")
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(name: "session", value: "old"),
+                makeCookie(name: "preference", value: "compact"),
+            ])
         jar.storeResponseCookies(
             fromResponseHeaders: [
                 "Set-Cookie": "session=new; Path=/; HttpOnly"
@@ -568,9 +581,11 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
     func testLatestResponseWinsForDeleteAndReplacementSequences() throws {
         let jar = try ApproovWebViewNativeCookieJar()
-        synchronize(jar, fromWebKit: [
-            makeCookie(name: "session", value: "initial")
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(name: "session", value: "initial")
+            ])
 
         jar.storeResponseCookies(
             fromResponseHeaders: [
@@ -607,9 +622,11 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
     func testPreparedRequestExcludesServerDeletedCookie() throws {
         let jar = try ApproovWebViewNativeCookieJar()
-        synchronize(jar, fromWebKit: [
-            makeCookie(name: "session", value: "authenticated")
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(name: "session", value: "authenticated")
+            ])
         jar.storeResponseCookies(
             fromResponseHeaders: [
                 "Set-Cookie": "session=; Max-Age=0; Path=/; HttpOnly"
@@ -626,19 +643,21 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
 
     func testDeletionLeavesIndependentDomainAndPathIdentitiesUntouched() throws {
         let jar = try ApproovWebViewNativeCookieJar()
-        synchronize(jar, fromWebKit: [
-            makeCookie(name: "session", value: "root"),
-            makeCookie(
-                name: "session",
-                value: "scoped",
-                path: "/account"
-            ),
-            makeCookie(
-                name: "session",
-                value: "other-domain",
-                domain: "other.example.com"
-            )
-        ])
+        synchronize(
+            jar,
+            fromWebKit: [
+                makeCookie(name: "session", value: "root"),
+                makeCookie(
+                    name: "session",
+                    value: "scoped",
+                    path: "/account"
+                ),
+                makeCookie(
+                    name: "session",
+                    value: "other-domain",
+                    domain: "other.example.com"
+                ),
+            ])
 
         jar.storeResponseCookies(
             fromResponseHeaders: [
@@ -651,7 +670,7 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
             Set(jar.allCookies.map { "\($0.domain)\($0.path)=\($0.value)" }),
             Set([
                 "api.example.com/account=scoped",
-                "other.example.com/=other-domain"
+                "other.example.com/=other-domain",
             ])
         )
         XCTAssertEqual(jar.webKitCookiesToDelete.count, 1)
@@ -664,7 +683,7 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         let initialWebKitCookies = [
             makeCookie(name: "replacement", value: "initial"),
             makeCookie(name: "delete-me", value: "authenticated"),
-            makeCookie(name: "expire-me", value: "authenticated")
+            makeCookie(name: "expire-me", value: "authenticated"),
         ]
         synchronize(jar, fromWebKit: initialWebKitCookies)
         let staleSnapshotTicket = jar.beginWebKitSnapshot()
@@ -733,9 +752,10 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
         XCTAssertTrue(pendingDeletionsAfterConfirmation.isEmpty)
 
         let preparedRequest = await harness.prepareRequest(for: apiURL)
-        let finalCookieHeader = preparedRequest.value(
-            forHTTPHeaderField: "Cookie"
-        ) ?? ""
+        let finalCookieHeader =
+            preparedRequest.value(
+                forHTTPHeaderField: "Cookie"
+            ) ?? ""
         XCTAssertFalse(finalCookieHeader.contains("delete-me="))
         XCTAssertFalse(finalCookieHeader.contains("expire-me="))
         XCTAssertTrue(finalCookieHeader.contains("replacement=value99"))
@@ -747,9 +767,10 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
                 let expectedCookieHeader = $0.value(
                     forHTTPHeaderField: "X-Test-Expected-Cookie"
                 )
-                let observedCookieHeader = $0.value(
-                    forHTTPHeaderField: "Cookie"
-                ) ?? "<none>"
+                let observedCookieHeader =
+                    $0.value(
+                        forHTTPHeaderField: "Cookie"
+                    ) ?? "<none>"
                 return !$0.httpShouldHandleCookies
                     && observedCookieHeader == expectedCookieHeader
             }
@@ -767,7 +788,7 @@ final class ApproovWebViewNativeCookieJarTests: XCTestCase {
             .path: path,
             .name: name,
             .value: value,
-            .secure: "TRUE"
+            .secure: "TRUE",
         ])!
     }
 
@@ -887,7 +908,8 @@ private final class CookieResponseURLProtocol: URLProtocol {
         }
 
         guard let url = request.url,
-              let index = Int(url.lastPathComponent) else {
+            let index = Int(url.lastPathComponent)
+        else {
             Self.finishRequest()
             client?.urlProtocol(
                 self,
@@ -937,9 +959,9 @@ private final class CookieResponseURLProtocol: URLProtocol {
             return "delete-me=; Max-Age=0; Path=/; HttpOnly"
         case 97:
             return """
-            expire-me=gone; Expires=Thu, 01 Jan 1970 00:00:00 GMT; \
-            Path=/; HttpOnly
-            """
+                expire-me=gone; Expires=Thu, 01 Jan 1970 00:00:00 GMT; \
+                Path=/; HttpOnly
+                """
         case 99:
             return "replacement=value99; Path=/; HttpOnly"
         default:
@@ -948,8 +970,8 @@ private final class CookieResponseURLProtocol: URLProtocol {
     }
 }
 
-private extension NSLock {
-    func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
+extension NSLock {
+    fileprivate func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
         lock()
         defer { unlock() }
         return try body()

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ApproovServiceWebViewCore
 
 final class ApproovWebViewSitePolicyTests: XCTestCase {
@@ -13,16 +14,24 @@ final class ApproovWebViewSitePolicyTests: XCTestCase {
     }
 
     func testBundledRulesAllowSameSiteAPIHosts() {
-        XCTAssertTrue(ApproovWebViewSitePolicy.isSameSite(
-            frameURL: URL(string: "https://shop.example.com/")!,
-            mainDocumentURL: URL(string: "https://www.example.com/")!,
-            requestURL: URL(string: "https://api.example.com/")!))
+        XCTAssertTrue(
+            ApproovWebViewSitePolicy.isSameSite(
+                frameURL: URL(string: "https://shop.example.com/")!,
+                mainDocumentURL: URL(string: "https://www.example.com/")!,
+                requestURL: URL(string: "https://api.example.com/")!))
     }
 
     func testPrivateSuffixTenantsAndMixedSchemesAreDifferentSites() {
-        XCTAssertFalse(ApproovWebViewSitePolicy.sameSite(URL(string: "https://alice.github.io/")!, URL(string: "https://bob.github.io/")!))
-        XCTAssertFalse(ApproovWebViewSitePolicy.sameSite(URL(string: "http://api.example.com/")!, URL(string: "https://shop.example.com/")!))
-        XCTAssertFalse(ApproovWebViewSitePolicy.isSameSite(frameURL: URL(string: "https://shop.example.com/")!,
-            mainDocumentURL: URL(string: "https://other.co.uk/")!, requestURL: URL(string: "https://api.example.com/")!))
+        XCTAssertFalse(
+            ApproovWebViewSitePolicy.sameSite(
+                URL(string: "https://alice.github.io/")!, URL(string: "https://bob.github.io/")!))
+        XCTAssertFalse(
+            ApproovWebViewSitePolicy.sameSite(
+                URL(string: "http://api.example.com/")!, URL(string: "https://shop.example.com/")!))
+        XCTAssertFalse(
+            ApproovWebViewSitePolicy.isSameSite(
+                frameURL: URL(string: "https://shop.example.com/")!,
+                mainDocumentURL: URL(string: "https://other.co.uk/")!,
+                requestURL: URL(string: "https://api.example.com/")!))
     }
 }

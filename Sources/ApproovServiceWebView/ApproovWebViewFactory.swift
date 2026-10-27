@@ -178,7 +178,8 @@ public enum ApproovWebViewFactory {
         }
         let dataStore = webView.configuration.websiteDataStore
         if let owner = objc_getAssociatedObject(dataStore, &storeAssociationKey) as? ApproovWebViewStoreOwner,
-           owner.webView != nil {
+            owner.webView != nil
+        {
             throw ApproovWebViewInstallationError.dataStoreAlreadyInUse
         }
         logger.debug(
@@ -215,8 +216,11 @@ public enum ApproovWebViewFactory {
         )
 
         coordinator.attach(webView: webView)
-        objc_setAssociatedObject(userContentController, &controllerAssociationKey, true as NSNumber, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        objc_setAssociatedObject(dataStore, &storeAssociationKey, ApproovWebViewStoreOwner(webView: webView), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        objc_setAssociatedObject(
+            userContentController, &controllerAssociationKey, true as NSNumber, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        objc_setAssociatedObject(
+            dataStore, &storeAssociationKey, ApproovWebViewStoreOwner(webView: webView),
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         setInstallation(
             ApproovWebViewInstallation(
@@ -233,27 +237,33 @@ public enum ApproovWebViewFactory {
             if !condition { throw ApproovWebViewInstallationError.invalidConfiguration(field) }
         }
         try require(configuration.maximumConcurrentRequests > 0, "maximumConcurrentRequests")
-        try require(configuration.maximumRequestDuration.isFinite && configuration.maximumRequestDuration > 0,
-                    "maximumRequestDuration")
+        try require(
+            configuration.maximumRequestDuration.isFinite && configuration.maximumRequestDuration > 0,
+            "maximumRequestDuration")
         try require(configuration.maximumRequestBodyBytes > 0, "maximumRequestBodyBytes")
         try require(configuration.maximumResponseBodyBytes > 0, "maximumResponseBodyBytes")
-        try require(!configuration.bridgeHandlerName.isEmpty &&
-            configuration.bridgeHandlerName.utf8.count <= 256 &&
-            !configuration.bridgeHandlerName.contains("\0"), "bridgeHandlerName")
-        let headerToken = CharacterSet(charactersIn: "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
-        try require(!configuration.approovTokenHeaderName.isEmpty &&
-            configuration.approovTokenHeaderName.unicodeScalars.allSatisfy(headerToken.contains), "approovTokenHeaderName")
-        try require(configuration.approovTokenHeaderPrefix.unicodeScalars.allSatisfy {
-            $0.value >= 0x20 && $0.value != 0x7f
-        }, "approovTokenHeaderPrefix")
+        try require(
+            !configuration.bridgeHandlerName.isEmpty && configuration.bridgeHandlerName.utf8.count <= 256
+                && !configuration.bridgeHandlerName.contains("\0"), "bridgeHandlerName")
+        let headerToken = CharacterSet(
+            charactersIn: "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+        try require(
+            !configuration.approovTokenHeaderName.isEmpty
+                && configuration.approovTokenHeaderName.unicodeScalars.allSatisfy(headerToken.contains),
+            "approovTokenHeaderName")
+        try require(
+            configuration.approovTokenHeaderPrefix.unicodeScalars.allSatisfy {
+                $0.value >= 0x20 && $0.value != 0x7f
+            }, "approovTokenHeaderPrefix")
         for endpoint in configuration.protectedEndpoints {
             try require(endpoint.port.map { (1...65535).contains($0) } ?? true, "protectedEndpoints.port")
             try require(endpoint.scheme == "https" || endpoint.scheme == "http", "protectedEndpoints.scheme")
             var components = URLComponents()
             components.scheme = endpoint.scheme
             components.host = endpoint.host
-            try require(!endpoint.host.isEmpty && components.url?.host?.lowercased() == endpoint.host &&
-                !endpoint.host.contains("*") && !endpoint.host.contains("@"), "protectedEndpoints.host")
+            try require(
+                !endpoint.host.isEmpty && components.url?.host?.lowercased() == endpoint.host
+                    && !endpoint.host.contains("*") && !endpoint.host.contains("@"), "protectedEndpoints.host")
         }
         for rule in configuration.allowedOrigins {
             if rule == "*" { continue }
@@ -261,11 +271,12 @@ public enum ApproovWebViewFactory {
             guard let components = URLComponents(string: candidate) else {
                 throw ApproovWebViewInstallationError.invalidConfiguration("allowedOrigins")
             }
-            try require((components.scheme == "https" || components.scheme == "http") &&
-                components.host?.isEmpty == false && components.user == nil && components.password == nil &&
-                (components.path.isEmpty || components.path == "/") && components.query == nil &&
-                components.fragment == nil && !candidate.contains("*") &&
-                (components.port.map { (1...65_535).contains($0) } ?? true), "allowedOrigins")
+            try require(
+                (components.scheme == "https" || components.scheme == "http") && components.host?.isEmpty == false
+                    && components.user == nil && components.password == nil
+                    && (components.path.isEmpty || components.path == "/") && components.query == nil
+                    && components.fragment == nil && !candidate.contains("*")
+                    && (components.port.map { (1...65_535).contains($0) } ?? true), "allowedOrigins")
         }
     }
 
@@ -275,11 +286,11 @@ public enum ApproovWebViewFactory {
         into webView: WKWebView
     ) {
         switch content {
-        case let .htmlString(html, baseURL):
+        case .htmlString(let html, let baseURL):
             webView.loadHTMLString(html, baseURL: baseURL)
-        case let .fileURL(fileURL, readAccessURL):
+        case .fileURL(let fileURL, let readAccessURL):
             webView.loadFileURL(fileURL, allowingReadAccessTo: readAccessURL)
-        case let .request(request):
+        case .request(let request):
             webView.load(request)
         }
     }

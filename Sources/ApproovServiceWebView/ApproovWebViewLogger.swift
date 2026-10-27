@@ -45,7 +45,8 @@ extension ApproovWebViewContent {
 extension ApproovWebViewProxyRequest {
     var logDescription: String {
         let method = method.isEmpty ? "GET" : method.uppercased()
-        return "\(requestSource.rawValue.uppercased()) \(method) \(ApproovWebViewLogger.redactedURLForLog(url)) [\(responseHandling.rawValue)]"
+        return
+            "\(requestSource.rawValue.uppercased()) \(method) \(ApproovWebViewLogger.redactedURLForLog(url)) [\(responseHandling.rawValue)]"
     }
 }
 
@@ -82,10 +83,12 @@ extension ApproovWebViewLogger {
             return "<nil-url>"
         }
 
-        guard var components = URLComponents(
-            url: url,
-            resolvingAgainstBaseURL: false
-        ) else {
+        guard
+            var components = URLComponents(
+                url: url,
+                resolvingAgainstBaseURL: false
+            )
+        else {
             return "<invalid-url>"
         }
 
@@ -103,7 +106,8 @@ extension ApproovWebViewLogger {
             return "none"
         }
 
-        return protectedEndpoints
+        return
+            protectedEndpoints
             .enumerated()
             .map { index, endpoint in
                 "\(index + 1). \(endpoint.logDescription)"

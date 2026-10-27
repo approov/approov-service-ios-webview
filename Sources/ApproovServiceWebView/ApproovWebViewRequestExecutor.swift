@@ -65,7 +65,9 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     /// Executes a page-originated request natively.
-    func execute(_ proxyRequest: ApproovWebViewProxyRequest, context: ApproovWebViewRequestContext) async throws -> ApproovWebViewExecutionResult {
+    func execute(_ proxyRequest: ApproovWebViewProxyRequest, context: ApproovWebViewRequestContext) async throws
+        -> ApproovWebViewExecutionResult
+    {
         logger.debug("Starting native execution for \(proxyRequest.logDescription)")
         guard activeRequests < configuration.maximumConcurrentRequests else {
             throw URLError(.resourceUnavailable)
@@ -83,13 +85,17 @@ final actor ApproovWebViewRequestExecutor {
         if mode == "navigate" && proxyRequest.responseHandling != .navigation {
             throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
         }
-        try ApproovWebViewBrowserPolicy.validateOptions(mode: mode, credentials: credentialsMode,
+        try ApproovWebViewBrowserPolicy.validateOptions(
+            mode: mode, credentials: credentialsMode,
             redirect: proxyRequest.redirect ?? "follow", cache: proxyRequest.cache ?? "default",
             integrity: proxyRequest.integrity ?? "")
-        try ApproovWebViewBrowserPolicy.validatePageHeaders(proxyRequest.headers,
+        try ApproovWebViewBrowserPolicy.validatePageHeaders(
+            proxyRequest.headers,
             tokenHeader: configuration.approovTokenHeaderName)
         let requestContext = try makeRequestContext(from: proxyRequest, context: context)
-        if mode == "same-origin" && ApproovWebViewBrowserPolicy.isCrossOrigin(requestContext.requestURL, sourceOrigin: context.frameOrigin) {
+        if mode == "same-origin"
+            && ApproovWebViewBrowserPolicy.isCrossOrigin(requestContext.requestURL, sourceOrigin: context.frameOrigin)
+        {
             throw ApproovWebViewBrowserPolicyError.corsRejected
         }
         guard configuration.isProtectedEndpoint(requestContext.requestURL) else {
@@ -153,11 +159,14 @@ final actor ApproovWebViewRequestExecutor {
             statusText: HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode),
             headers: ApproovWebViewBrowserPolicy.exposedHeaders(
                 normalizeHeaders(httpResponse.allHeaderFields),
-                crossOrigin: mode != "navigate" && ApproovWebViewBrowserPolicy.isCrossOrigin(finalURL, sourceOrigin: context.frameOrigin),
+                crossOrigin: mode != "navigate"
+                    && ApproovWebViewBrowserPolicy.isCrossOrigin(finalURL, sourceOrigin: context.frameOrigin),
                 credentials: credentials),
             bodyBase64: data.base64EncodedString(),
             redirected: redirected,
-            type: mode == "cors" && ApproovWebViewBrowserPolicy.isCrossOrigin(finalURL, sourceOrigin: context.frameOrigin) ? "cors" : "basic"
+            type: mode == "cors"
+                && ApproovWebViewBrowserPolicy.isCrossOrigin(finalURL, sourceOrigin: context.frameOrigin)
+                ? "cors" : "basic"
         )
 
         switch proxyRequest.responseHandling {
@@ -198,20 +207,26 @@ final actor ApproovWebViewRequestExecutor {
             let crossOrigin = ApproovWebViewBrowserPolicy.isCrossOrigin(currentURL, sourceOrigin: context.frameOrigin)
             if mode == "same-origin" && crossOrigin { throw ApproovWebViewBrowserPolicyError.corsRejected }
             let method = currentRequest.httpMethod ?? "GET"
-            if mode == "cors" && crossOrigin && ApproovWebViewBrowserPolicy.needsPreflight(method: method, headers: remainingPageHeaders) {
+            if mode == "cors" && crossOrigin
+                && ApproovWebViewBrowserPolicy.needsPreflight(method: method, headers: remainingPageHeaders)
+            {
                 var preflight = URLRequest(url: currentURL)
                 preflight.httpMethod = "OPTIONS"
                 preflight.setValue(context.frameOrigin, forHTTPHeaderField: "Origin")
                 preflight.setValue(method, forHTTPHeaderField: "Access-Control-Request-Method")
                 let names = ApproovWebViewBrowserPolicy.unsafeHeaderNames(remainingPageHeaders)
-                if !names.isEmpty { preflight.setValue(names.joined(separator: ","), forHTTPHeaderField: "Access-Control-Request-Headers") }
+                if !names.isEmpty {
+                    preflight.setValue(
+                        names.joined(separator: ","), forHTTPHeaderField: "Access-Control-Request-Headers")
+                }
                 preflight.httpShouldHandleCookies = false
                 ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &preflight)
                 let (_, preflightResponse, preflightRedirect) = try await performSignedRequest(preflight)
                 guard preflightRedirect == nil, let response = preflightResponse as? HTTPURLResponse else {
                     throw ApproovWebViewBrowserPolicyError.corsRejected
                 }
-                try ApproovWebViewBrowserPolicy.checkPreflight(status: response.statusCode,
+                try ApproovWebViewBrowserPolicy.checkPreflight(
+                    status: response.statusCode,
                     headers: normalizeHeaders(response.allHeaderFields), sourceOrigin: context.frameOrigin,
                     credentials: credentials, method: method, requestHeaders: remainingPageHeaders)
             }
@@ -221,11 +236,13 @@ final actor ApproovWebViewRequestExecutor {
             }
 
             if mode == "cors" && crossOrigin {
-                try ApproovWebViewBrowserPolicy.checkCORS(headers: normalizeHeaders(httpResponse.allHeaderFields),
+                try ApproovWebViewBrowserPolicy.checkCORS(
+                    headers: normalizeHeaders(httpResponse.allHeaderFields),
                     sourceOrigin: context.frameOrigin, credentials: credentials)
             }
             if let responseURL = httpResponse.url,
-               try allowsCookies(credentials: credentials, url: responseURL, context: context) {
+                try allowsCookies(credentials: credentials, url: responseURL, context: context)
+            {
                 storeResponseCookies(from: httpResponse)
             }
 
@@ -240,7 +257,8 @@ final actor ApproovWebViewRequestExecutor {
             redirectCount += 1
 
             guard let redirectURL = redirectRequest.url,
-                  Self.isHTTPScheme(redirectURL) else {
+                Self.isHTTPScheme(redirectURL)
+            else {
                 throw ApproovWebViewBridgeError.unsupportedScheme(
                     redirectRequest.url?.absoluteString ?? "<missing>"
                 )
@@ -261,11 +279,13 @@ final actor ApproovWebViewRequestExecutor {
                 }
             }
             redirectRequest.setValue(nil, forHTTPHeaderField: "Referer")
-            redirectRequest.setValue(try ApproovWebViewBrowserPolicy.referrer(
-                pageURL: context.frameURL, sourceOrigin: context.frameOrigin, destination: redirectURL,
-                requestedReferrer: requestedReferrer, policy: referrerPolicy), forHTTPHeaderField: "Referer")
+            redirectRequest.setValue(
+                try ApproovWebViewBrowserPolicy.referrer(
+                    pageURL: context.frameURL, sourceOrigin: context.frameOrigin, destination: redirectURL,
+                    requestedReferrer: requestedReferrer, policy: referrerPolicy), forHTTPHeaderField: "Referer")
             if ApproovWebViewBrowserPolicy.isCrossOrigin(redirectURL, sourceOrigin: context.frameOrigin)
-                || shouldApplyOriginHeader(forHTTPMethod: redirectRequest.httpMethod) {
+                || shouldApplyOriginHeader(forHTTPMethod: redirectRequest.httpMethod)
+            {
                 redirectRequest.setValue(context.frameOrigin, forHTTPHeaderField: "Origin")
             } else {
                 redirectRequest.setValue(nil, forHTTPHeaderField: "Origin")
@@ -283,11 +303,13 @@ final actor ApproovWebViewRequestExecutor {
     }
 
     private func performSignedRequest(_ request: URLRequest) async throws -> (Data, URLResponse, URLRequest?) {
-        let tokenHeader = testTransport == nil ? ApproovService.getApproovTokenHeader() : configuration.approovTokenHeaderName
+        let tokenHeader =
+            testTransport == nil ? ApproovService.getApproovTokenHeader() : configuration.approovTokenHeaderName
         var unsigned = request
         // Foundation can carry URLProtocol properties into redirect proposals.
         ApproovWebViewServiceMutator.clearAlreadySigned(&unsigned)
-        var signed = try ApproovWebViewTokenPolicy.sign(unsigned, header: tokenHeader,
+        var signed = try ApproovWebViewTokenPolicy.sign(
+            unsigned, header: tokenHeader,
             prefix: configuration.approovTokenHeaderPrefix,
             allowMissing: configuration.allowRequestsWithoutApproovToken,
             signer: { request in
@@ -298,7 +320,8 @@ final actor ApproovWebViewRequestExecutor {
                     // The decision belongs to this executor, not the global
                     // URL-only SDK callback shared with unrelated clients.
                     if configuration.allowRequestsWithoutApproovToken,
-                       case .networkingError = error {
+                        case .networkingError = error
+                    {
                         return request
                     }
                     throw error
@@ -358,7 +381,8 @@ final actor ApproovWebViewRequestExecutor {
             request.setValue(referrer, forHTTPHeaderField: "Referer")
         }
         if ApproovWebViewBrowserPolicy.isCrossOrigin(requestURL, sourceOrigin: context.frameOrigin)
-            || shouldApplyOriginHeader(forHTTPMethod: request.httpMethod) {
+            || shouldApplyOriginHeader(forHTTPMethod: request.httpMethod)
+        {
             request.setValue(context.frameOrigin, forHTTPHeaderField: "Origin")
         }
 
@@ -368,9 +392,13 @@ final actor ApproovWebViewRequestExecutor {
     /// WebKit third-party tracking policy is not available to native requests.
     /// Reject credentialed cross-site requests rather than bypassing it.
     private func allowsCookies(credentials: String, url: URL, context: ApproovWebViewRequestContext) throws -> Bool {
-        guard ApproovWebViewBrowserPolicy.sendsCredentials(credentials, url: url, sourceOrigin: context.frameOrigin) else { return false }
-        guard ApproovWebViewSitePolicy.isSameSite(frameURL: context.frameURL,
-            mainDocumentURL: context.mainDocumentURL, requestURL: url) else {
+        guard ApproovWebViewBrowserPolicy.sendsCredentials(credentials, url: url, sourceOrigin: context.frameOrigin)
+        else { return false }
+        guard
+            ApproovWebViewSitePolicy.isSameSite(
+                frameURL: context.frameURL,
+                mainDocumentURL: context.mainDocumentURL, requestURL: url)
+        else {
             throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
         }
         return true
@@ -380,10 +408,12 @@ final actor ApproovWebViewRequestExecutor {
     private func synchronizeCookiesIntoNativeStorage() async {
         let snapshotTicket = nativeCookieJar.beginWebKitSnapshot()
         let webCookies = await cookieBridge.allCookies()
-        guard nativeCookieJar.synchronizeFromWebKit(
-            webCookies,
-            snapshotTicket: snapshotTicket
-        ) else {
+        guard
+            nativeCookieJar.synchronizeFromWebKit(
+                webCookies,
+                snapshotTicket: snapshotTicket
+            )
+        else {
             logger.debug(
                 "Ignoring stale WebKit cookie snapshot \(snapshotTicket)"
             )
@@ -480,9 +510,12 @@ final actor ApproovWebViewRequestExecutor {
             setHeader: { ApproovService.setApproovHeader(header: $0, prefix: $1) },
             setDevKey: { ApproovService.setDevKey(devKey: $0) }
         )
-        try Self.bootstrap.install(requested, service: service,
+        try Self.bootstrap.install(
+            requested, service: service,
             configure: configuration.configureApproovService,
-            installScope: { ApproovWebViewServiceMutator.installOrUpdateScope(scopeID: scopeID, configuration: configuration) })
+            installScope: {
+                ApproovWebViewServiceMutator.installOrUpdateScope(scopeID: scopeID, configuration: configuration)
+            })
 
         didInitializeApproov = true
         logger.debug("Approov initialization completed for scope \(scopeID)")
@@ -496,26 +529,30 @@ final actor ApproovWebViewRequestExecutor {
         logger.debug("Executing protected request via ApproovURLSession: \(request.logDescription)")
         let redirectDelegate = redirectDelegate
         let taskReference = ApproovWebViewTaskReference()
-        return try await withTaskCancellationHandler(operation: {
-            try await withCheckedThrowingContinuation {
-            (
-                continuation:
-                    CheckedContinuation<
-                        (Data, URLResponse, URLRequest?),
-                        Error
-                    >
-            ) in
-            let task = urlSession.dataTask(with: request)
-            redirectDelegate.register(taskID: task.taskIdentifier,
-                                      maximumBytes: configuration.maximumResponseBodyBytes) { result in
-                continuation.resume(with: result)
-            }
-            taskReference.register(task)
-            task.resume()
-            }
-        }, onCancel: {
-            taskReference.cancel()
-        })
+        return try await withTaskCancellationHandler(
+            operation: {
+                try await withCheckedThrowingContinuation {
+                    (
+                        continuation:
+                            CheckedContinuation<
+                                (Data, URLResponse, URLRequest?),
+                                Error
+                            >
+                    ) in
+                    let task = urlSession.dataTask(with: request)
+                    redirectDelegate.register(
+                        taskID: task.taskIdentifier,
+                        maximumBytes: configuration.maximumResponseBodyBytes
+                    ) { result in
+                        continuation.resume(with: result)
+                    }
+                    taskReference.register(task)
+                    task.resume()
+                }
+            },
+            onCancel: {
+                taskReference.cancel()
+            })
     }
 
     /// Converts Foundation's heterogenous header map into JSON-safe values.
@@ -562,7 +599,8 @@ final actor ApproovWebViewRequestExecutor {
 
     private static func originString(from url: URL) -> String? {
         guard let scheme = url.scheme,
-              let host = url.host else {
+            let host = url.host
+        else {
             return nil
         }
 
@@ -577,7 +615,8 @@ final actor ApproovWebViewRequestExecutor {
 /// Shares a task identifier with its completion handler without capturing a
 /// mutable local variable across concurrency domains.
 final class ApproovWebViewTaskReference:
-    @unchecked Sendable {
+    @unchecked Sendable
+{
     private let lock = NSLock()
     private var storedTaskIdentifier: Int?
     private var task: URLSessionTask?

@@ -4,7 +4,8 @@ import Foundation
 package enum ApproovWebViewResponseCookies {
     package static func cookies(fromResponseHeaders headers: [AnyHashable: Any], url: URL) -> [HTTPCookie] {
         guard let host = url.host, !host.isEmpty,
-              let storage = URLSessionConfiguration.ephemeral.httpCookieStorage else { return [] }
+            let storage = URLSessionConfiguration.ephemeral.httpCookieStorage
+        else { return [] }
         let values: [String] = headers.flatMap { entry -> [String] in
             guard String(describing: entry.key).caseInsensitiveCompare("Set-Cookie") == .orderedSame else { return [] }
             if let strings = entry.value as? [String] { return strings }
@@ -24,15 +25,20 @@ package enum ApproovWebViewResponseCookies {
             if domains.contains(where: { item in
                 guard let value = item.1, !value.isEmpty else { return true }
                 return ApproovWebViewSitePolicy.isPublicSuffix(value)
-            }) { return [] }
+            }) {
+                return []
+            }
             return HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": segment], for: url).filter { cookie in
                 guard !cookie.isSecure || url.scheme?.lowercased() == "https" else { return false }
                 let lowerName = cookie.name.lowercased()
-                if lowerName.hasPrefix("__secure-") && (!cookie.isSecure || url.scheme?.lowercased() != "https") { return false }
+                if lowerName.hasPrefix("__secure-") && (!cookie.isSecure || url.scheme?.lowercased() != "https") {
+                    return false
+                }
                 if lowerName.hasPrefix("__host-") {
                     let paths = attributes.filter { $0.0 == "path" }
                     guard cookie.isSecure, url.scheme?.lowercased() == "https",
-                          !paths.isEmpty, paths.allSatisfy({ $0.1 == "/" }), domains.isEmpty else { return false }
+                        !paths.isEmpty, paths.allSatisfy({ $0.1 == "/" }), domains.isEmpty
+                    else { return false }
                 }
                 // A non-expiring copy permits Foundation to validate source
                 // domain and public-suffix acceptance even for deletions.
@@ -55,7 +61,8 @@ package enum ApproovWebViewResponseCookies {
     /// a comma followed by a cookie-name token and '=' outside quotes, not the
     /// comma inside an Expires date or a quoted value.
     private static func splitCombinedHeader(_ header: String) -> [String] {
-        let token = CharacterSet(charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        let token = CharacterSet(
+            charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
         var start = header.startIndex
         var index = start
         var quoted = false
@@ -63,14 +70,21 @@ package enum ApproovWebViewResponseCookies {
         var result: [String] = []
         while index < header.endIndex {
             let character = header[index]
-            if quoted && escaped { escaped = false }
-            else if quoted && character == "\\" { escaped = true }
-            else if character == "\"" { quoted.toggle() }
-            else if character == "," && !quoted {
+            if quoted && escaped {
+                escaped = false
+            } else if quoted && character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                quoted.toggle()
+            } else if character == "," && !quoted {
                 var next = header.index(after: index)
-                while next < header.endIndex && (header[next] == " " || header[next] == "\t") { next = header.index(after: next) }
+                while next < header.endIndex && (header[next] == " " || header[next] == "\t") {
+                    next = header.index(after: next)
+                }
                 let nameStart = next
-                while next < header.endIndex && header[next].unicodeScalars.allSatisfy({ token.contains($0) }) { next = header.index(after: next) }
+                while next < header.endIndex && header[next].unicodeScalars.allSatisfy({ token.contains($0) }) {
+                    next = header.index(after: next)
+                }
                 if next > nameStart && next < header.endIndex && header[next] == "=" {
                     result.append(String(header[start..<index]).trimmingCharacters(in: .whitespacesAndNewlines))
                     start = header.index(after: index)
