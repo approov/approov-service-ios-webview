@@ -30,6 +30,20 @@ final class ApproovWebViewResponseCookiesTests: XCTestCase {
         XCTAssertEqual(byName["csrf"], "tok456")
     }
 
+    func testRejectsUnrelatedAndPublicSuffixDomains() {
+        for domain in ["evil.test", "com", "example.com"] {
+            let cookies = ApproovWebViewResponseCookies.cookies(
+                fromResponseHeaders: ["Set-Cookie": "bad=1; Domain=\(domain); Path=/"], url: url)
+            XCTAssertTrue(cookies.isEmpty, domain)
+        }
+    }
+
+    func testRejectsInsecureSecurePrefix() {
+        let cookies = ApproovWebViewResponseCookies.cookies(
+            fromResponseHeaders: ["Set-Cookie": "__Secure-id=1; Path=/"], url: url)
+        XCTAssertTrue(cookies.isEmpty)
+    }
+
     func testReturnsEmptyWhenNoSetCookieHeaderPresent() {
         let cookies = ApproovWebViewResponseCookies.cookies(
             fromResponseHeaders: ["Content-Type": "application/json"],
