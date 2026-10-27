@@ -233,6 +233,8 @@ public enum ApproovWebViewFactory {
             if !condition { throw ApproovWebViewInstallationError.invalidConfiguration(field) }
         }
         try require(configuration.maximumConcurrentRequests > 0, "maximumConcurrentRequests")
+        try require(configuration.maximumRequestDuration.isFinite && configuration.maximumRequestDuration > 0,
+                    "maximumRequestDuration")
         try require(configuration.maximumRequestBodyBytes > 0, "maximumRequestBodyBytes")
         try require(configuration.maximumResponseBodyBytes > 0, "maximumResponseBodyBytes")
         try require(!configuration.bridgeHandlerName.isEmpty &&

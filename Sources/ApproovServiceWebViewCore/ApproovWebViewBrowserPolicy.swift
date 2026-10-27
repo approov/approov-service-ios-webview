@@ -34,7 +34,7 @@ package enum ApproovWebViewBrowserPolicy {
         guard ["cors", "same-origin", "navigate"].contains(mode),
               ["omit", "same-origin", "include"].contains(credentials),
               ["follow", "error"].contains(redirect),
-              ["default", "no-store", "reload", "no-cache"].contains(cache),
+              ["default", "no-store"].contains(cache),
               integrity.isEmpty else { throw ApproovWebViewBrowserPolicyError.unsupportedPolicy }
     }
 

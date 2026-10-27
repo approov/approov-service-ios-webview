@@ -32,12 +32,21 @@ package final class ApproovWebViewRedirectDelegate:
                             didReceive response: URLResponse,
                             completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         lock.lock()
+        var cancel = false
         if var item = pending[dataTask.taskIdentifier] {
             item.response = response
+            if response.expectedContentLength > Int64(item.maximumBytes) {
+                item.limitExceeded = true
+                cancel = true
+            }
+            if let response = response as? HTTPURLResponse,
+               (response.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().hasPrefix("text/event-stream") {
+                cancel = true
+            }
             pending[dataTask.taskIdentifier] = item
         }
         lock.unlock()
-        completionHandler(.allow)
+        completionHandler(cancel ? .cancel : .allow)
     }
 
     package func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {

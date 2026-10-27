@@ -182,6 +182,7 @@ public struct ApproovWebViewConfiguration: Sendable {
     public let maximumRequestBodyBytes: Int
     public let maximumResponseBodyBytes: Int
     public let maximumConcurrentRequests: Int
+    public let maximumRequestDuration: TimeInterval
 
     /// The host initializes and configures ApproovURLSession itself in this mode.
     /// The bridge composes its scope policy without resetting shared service state.
@@ -222,6 +223,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         maximumRequestBodyBytes: Int = 10 * 1024 * 1024,
         maximumResponseBodyBytes: Int = 10 * 1024 * 1024,
         maximumConcurrentRequests: Int = 16,
+        maximumRequestDuration: TimeInterval = 60,
         usesExistingApproovService: Bool = false,
         configureApproovService: @escaping @Sendable () throws -> Void = {},
         mutateRequest: @escaping @Sendable (URLRequest) -> URLRequest = { $0 },
@@ -242,6 +244,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         self.maximumRequestBodyBytes = maximumRequestBodyBytes
         self.maximumResponseBodyBytes = maximumResponseBodyBytes
         self.maximumConcurrentRequests = maximumConcurrentRequests
+        self.maximumRequestDuration = maximumRequestDuration
         self.usesExistingApproovService = usesExistingApproovService
         self.configureApproovService = configureApproovService
         self.mutateRequest = mutateRequest

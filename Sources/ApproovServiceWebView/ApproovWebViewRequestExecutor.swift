@@ -26,6 +26,7 @@ final actor ApproovWebViewRequestExecutor {
         let bootstrap: () throws -> Void
         let signer: (URLRequest) throws -> URLRequest
         let send: (URLRequest) async throws -> (Data, URLResponse, URLRequest?)
+        var usesNativeTransport = false
     }
     private let testTransport: TestTransport?
     private let scopeID = UUID().uuidString
@@ -46,6 +47,8 @@ final actor ApproovWebViewRequestExecutor {
         let redirectDelegate = ApproovWebViewRedirectDelegate()
         self.nativeCookieJar = nativeCookieJar
         self.redirectDelegate = redirectDelegate
+        nativeCookieJar.sessionConfiguration.timeoutIntervalForResource = configuration.maximumRequestDuration
+        nativeCookieJar.sessionConfiguration.timeoutIntervalForRequest = configuration.maximumRequestDuration
         self.urlSession = ApproovURLSession(
             configuration: nativeCookieJar.sessionConfiguration,
             delegate: redirectDelegate,
@@ -305,7 +308,7 @@ final actor ApproovWebViewRequestExecutor {
             throw ApproovWebViewBridgeError.requestNotProtected("<mutated destination>")
         }
         ApproovWebViewServiceMutator.markAlreadySigned(&signed)
-        if let testTransport { return try await testTransport.send(signed) }
+        if let testTransport, !testTransport.usesNativeTransport { return try await testTransport.send(signed) }
         return try await performPinnedRequest(signed)
     }
 
@@ -320,6 +323,10 @@ final actor ApproovWebViewRequestExecutor {
 
         guard Self.isHTTPScheme(requestURL) else {
             throw ApproovWebViewBridgeError.unsupportedScheme(proxyRequest.url)
+        }
+
+        guard requestURL.user == nil, requestURL.password == nil else {
+            throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
         }
 
         var request = URLRequest(url: requestURL)
