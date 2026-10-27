@@ -163,11 +163,26 @@ package enum ApproovWebViewJavaScriptBridge {
       const makeFetchResponse = (nativeResponse, requestMethod) => {
         const responseBytes = base64ToUint8Array(nativeResponse.bodyBase64);
         const nullBody = requestMethod === "HEAD" || [204, 205, 304].includes(nativeResponse.status);
-        return new Response(nullBody ? null : responseBytes, {
+        const decorate = (response) => {
+          const clone = response.clone.bind(response);
+          Object.defineProperties(response, {
+            url: { value: nativeResponse.url || "", enumerable: true },
+            redirected: { value: Boolean(nativeResponse.redirected), enumerable: true },
+            type: { value: nativeResponse.type || "basic", enumerable: true },
+            clone: { value: () => decorate(clone()) },
+          });
+          for (const name of ["append", "delete", "set"]) {
+            Object.defineProperty(response.headers, name, {
+              value: () => { throw new TypeError("Response headers are immutable"); },
+            });
+          }
+          return response;
+        };
+        return decorate(new Response(nullBody ? null : responseBytes, {
           status: nativeResponse.status,
           statusText: nativeResponse.statusText,
           headers: nativeResponse.headers,
-        });
+        }));
       };
 
       const postDiagnostic = (payload) => {

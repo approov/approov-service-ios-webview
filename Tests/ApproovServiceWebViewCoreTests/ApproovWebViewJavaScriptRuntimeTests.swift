@@ -58,4 +58,26 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testFetchResponseMetadataAndClone() async throws {
+        let controller = WKUserContentController()
+        let reply = Reply()
+        controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
+        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController = controller
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let result = try await view.callAsyncJavaScript("""
+            const response = await fetch('https://api.example.com/test');
+            const copy = response.clone();
+            let immutable = false;
+            try { response.headers.set('x-test', 'value'); } catch (e) { immutable = e instanceof TypeError; }
+            return response.url === 'https://api.example.com/final' && response.redirected &&
+                copy.url === response.url && copy.redirected && immutable &&
+                await response.text() === '{}' && await copy.text() === '{}';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
