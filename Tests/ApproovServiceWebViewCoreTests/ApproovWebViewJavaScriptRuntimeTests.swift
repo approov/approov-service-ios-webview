@@ -450,4 +450,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testProgrammaticSubmitIgnoresCancelledClickSubmitter() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            document.body.innerHTML = '<form method="post" action="https://api.example.com/echo"><input name="field" value="value"><button name="stale" value="button" formaction="https://api.example.com/wrong">Go</button></form>';
+            const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
+            const button = form.querySelector('button'); button.addEventListener('click', event => event.preventDefault());
+            const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
+            button.click(); form.submit(); const payload = await done;
+            return payload.url === 'https://api.example.com/echo' && atob(payload.bodyBase64) === 'field=value';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

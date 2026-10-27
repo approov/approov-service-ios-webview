@@ -1050,7 +1050,9 @@ package enum ApproovWebViewJavaScriptBridge {
           return;
         }
 
-        submitterByForm.set(clickedElement.form, clickedElement);
+        const clickedForm = clickedElement.form;
+        submitterByForm.set(clickedForm, clickedElement);
+        setTimeout(() => { if (submitterByForm.get(clickedForm) === clickedElement) submitterByForm.delete(clickedForm); }, 0);
         if (clickedElement instanceof HTMLInputElement && clickedElement.type === "image") {
           imageCoordinates.set(clickedElement, { x: Math.max(0, Math.floor(event.offsetX)), y: Math.max(0, Math.floor(event.offsetY)) });
           setTimeout(() => imageCoordinates.delete(clickedElement), 0);
@@ -1063,7 +1065,7 @@ package enum ApproovWebViewJavaScriptBridge {
       document.addEventListener("submit", (event) => {
         const form = event.target;
         if (!(form instanceof HTMLFormElement) || !event.cancelable) return;
-        const submitter = event.submitter || submitterByForm.get(form) || null;
+        const submitter = "submitter" in event ? event.submitter : submitterByForm.get(form) || null;
         const point = imageCoordinates.get(submitter) || null;
         let cancelled = event.defaultPrevented;
         let reserved = false;
@@ -1127,7 +1129,8 @@ package enum ApproovWebViewJavaScriptBridge {
       // explicitly if programmatic submission should also be protected.
       HTMLFormElement.prototype.submit = function () {
         const form = this;
-        const submitter = submitterByForm.get(form) || null;
+        submitterByForm.delete(form);
+        const submitter = null;
 
         if (!isNativeHandledForm(form, submitter)) {
           return originalFormSubmit.call(form);
@@ -1140,11 +1143,10 @@ package enum ApproovWebViewJavaScriptBridge {
       // the subsequent `submit` event sees the correct form overrides.
       if (originalRequestSubmit) {
         HTMLFormElement.prototype.requestSubmit = function (submitter) {
-          if (submitter) {
-            submitterByForm.set(this, submitter);
-          }
-
-          return originalRequestSubmit.call(this, submitter);
+          submitterByForm.delete(this);
+          if (submitter) submitterByForm.set(this, submitter);
+          try { return originalRequestSubmit.call(this, submitter); }
+          finally { submitterByForm.delete(this); }
         };
       }
 
