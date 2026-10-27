@@ -485,28 +485,11 @@ final actor ApproovWebViewRequestExecutor {
                         Error
                     >
             ) in
-            let task = urlSession.dataTask(with: request) { data, response, error in
-                let proposedRedirect = taskReference.taskIdentifier.flatMap {
-                    redirectDelegate.takeProposedRequest(
-                        for: $0
-                    )
-                }
-
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-
-                guard let data, let response else {
-                    continuation.resume(throwing: ApproovWebViewBridgeError.nonHTTPResponse)
-                    return
-                }
-
-                continuation.resume(
-                    returning: (data, response, proposedRedirect)
-                )
+            let task = urlSession.dataTask(with: request)
+            redirectDelegate.register(taskID: task.taskIdentifier,
+                                      maximumBytes: configuration.maximumResponseBodyBytes) { result in
+                continuation.resume(with: result)
             }
-
             taskReference.register(task)
             task.resume()
             }
