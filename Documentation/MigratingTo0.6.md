@@ -49,6 +49,8 @@ It cancels requests from the previous installation.
 The underlying representable view is now an `ApproovWebViewContainer`.
 
 Retain a configuration value across ordinary SwiftUI updates.
+For a configuration created inside a `View`, use `@State`, as in the README example.
+A plain stored `let` can create a new installation identity each time SwiftUI recreates that view value.
 Create a new configuration only for an intended policy change.
 Use `onError` to connect installation failures to the host's retry interface.
 

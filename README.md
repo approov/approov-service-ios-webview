@@ -171,7 +171,7 @@ import ApproovServiceWebView
 import SwiftUI
 
 struct ProtectedWebExperience: View {
-    private let configuration = ApproovWebViewConfiguration(
+    @State private var configuration = ApproovWebViewConfiguration(
         approovConfig: "<your-approov-config>",
         protectedEndpoints: [
             ApproovWebViewProtectedEndpoint(
