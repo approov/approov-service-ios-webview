@@ -867,9 +867,16 @@ package enum ApproovWebViewJavaScriptBridge {
             }
           }
 
+          const previousReadyState = xhr.readyState;
+          const backingReadyState = getNativeXMLHttpRequestProperty(xhr, "readyState");
           const savedResponseType = xhr.responseType;
           const savedTimeout = xhr.timeout;
           const savedCredentials = xhr.withCredentials;
+          if (protectedState.active && !protectedURL) {
+            setNativeXMLHttpRequestProperty(xhr, "responseType", savedResponseType);
+            setNativeXMLHttpRequestProperty(xhr, "timeout", savedTimeout);
+            setNativeXMLHttpRequestProperty(xhr, "withCredentials", savedCredentials);
+          }
           cancelProtectedRequest();
           protectedState.generation += 1;
           protectedState.aborted = false;
@@ -900,7 +907,11 @@ package enum ApproovWebViewJavaScriptBridge {
           }
 
           protectedState.active = true;
-          changeProtectedReadyState(1);
+          protectedState.readyState = 1;
+          // Opening the backing XHR also terminates any old WebKit transport.
+          // It stays unsent: only native bridge traffic sends protected bytes.
+          nativeOpen(method, resolvedURL, true);
+          if (backingReadyState === 1 && previousReadyState !== 1) changeProtectedReadyState(1);
         };
 
         xhr.setRequestHeader = (name, value) => {

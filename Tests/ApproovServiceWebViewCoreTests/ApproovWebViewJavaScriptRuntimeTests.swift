@@ -535,4 +535,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testNativeToProtectedXHRReopenTerminatesOldTransport() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); let loads = 0; xhr.onload = () => loads++;
+            xhr.open('GET','data:text/plain,old'); xhr.send();
+            xhr.open('GET','https://api.example.com/');
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
+            await new Promise(resolve => setTimeout(resolve, 20));
+            return xhr.responseText === '{}' && loads === 1;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
