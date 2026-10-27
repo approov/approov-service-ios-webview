@@ -561,6 +561,11 @@ package enum ApproovWebViewJavaScriptBridge {
         }
       };
 
+      const toDOMString = value => {
+        if (typeof value === "symbol") throw new TypeError("Cannot convert a Symbol to a DOMString");
+        return String(value);
+      };
+
       const makeXHREvent = (type, loaded = 0, total = 0, lengthComputable = false) =>
         type === "readystatechange" ? new Event(type) : new ProgressEvent(type, { loaded, total, lengthComputable });
 
@@ -749,10 +754,10 @@ package enum ApproovWebViewJavaScriptBridge {
             },
             set(value) {
               if (protectedState.active) {
+                const type = toDOMString(value);
                 if (protectedState.readyState === 3 || protectedState.readyState === 4) {
                   throw new DOMException("responseType cannot be changed after loading starts", "InvalidStateError");
                 }
-                const type = String(value);
                 if (["", "text", "json", "arraybuffer", "blob", "document"].includes(type)) protectedState.responseType = type;
                 return;
               }
@@ -864,17 +869,20 @@ package enum ApproovWebViewJavaScriptBridge {
           }, Math.max(0, remaining));
         };
 
-        xhr.open = (method, url, async = true, user = null, password = null) => {
-          const protectedURL = isProtectedEndpoint(url);
+        xhr.open = function (method, url, async = true, user = null, password = null) {
+          if (arguments.length < 2) return nativeOpen(...arguments);
+          const methodString = toDOMString(method);
+          const urlString = toDOMString(url);
+          const protectedURL = isProtectedEndpoint(urlString);
           let resolvedURL;
-          try { resolvedURL = new URL(url, document.baseURI).toString(); }
-          catch (_) { return nativeOpen(method, url, async, user, password); }
+          try { resolvedURL = new URL(urlString, document.baseURI).toString(); }
+          catch (_) { return nativeOpen(methodString, urlString, async, user, password); }
           let validator = null;
           if (protectedURL) {
             // Let WebKit perform Web IDL, token and forbidden-method validation
             // without changing the live request or sending browser traffic.
             validator = new OriginalXMLHttpRequest();
-            validator.open(method, resolvedURL, async, user, password);
+            validator.open(methodString, resolvedURL, async, user, password);
             if (!Boolean(async)) {
               throw new DOMException("Synchronous XMLHttpRequest is not supported for protected endpoints.", "NotSupportedError");
             }
@@ -901,7 +909,6 @@ package enum ApproovWebViewJavaScriptBridge {
           protectedState.active = false;
           protectedState.headers = Object.create(null);
           protectedState.headerValidator = validator;
-          const methodString = String(method);
           const normalizedMethod = methodString.toUpperCase();
           protectedState.method = ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"].includes(normalizedMethod)
             ? normalizedMethod : methodString;
@@ -920,28 +927,28 @@ package enum ApproovWebViewJavaScriptBridge {
 
           if (!protectedURL) {
             logUnprotectedRequestBypass("xhr", resolvedURL);
-            return nativeOpen(method, url, async, user, password);
+            return nativeOpen(methodString, urlString, async, user, password);
           }
 
           protectedState.active = true;
           protectedState.readyState = 1;
           // Opening the backing XHR also terminates any old WebKit transport.
           // It stays unsent: only native bridge traffic sends protected bytes.
-          nativeOpen(method, resolvedURL, true);
+          nativeOpen(methodString, resolvedURL, true);
           if (backingReadyState === 1 && previousReadyState !== 1) changeProtectedReadyState(1);
         };
 
-        xhr.setRequestHeader = (name, value) => {
-          if (!protectedState.active) {
-            nativeSetRequestHeader(name, value);
+        xhr.setRequestHeader = function (name, value) {
+          if (!protectedState.active || arguments.length < 2) {
+            nativeSetRequestHeader(...arguments);
             return;
           }
 
+          const headerName = toDOMString(name);
+          const headerValue = toDOMString(value);
           if (protectedState.readyState !== 1 || protectedState.sending) {
             throw new DOMException("Request headers cannot be changed in this state", "InvalidStateError");
           }
-          const headerName = String(name);
-          const headerValue = String(value);
           protectedState.headerValidator.setRequestHeader(headerName, headerValue);
           const key = headerName.toLowerCase();
           const forbidden = ["accept-charset", "accept-encoding", "access-control-request-headers",
@@ -956,13 +963,13 @@ package enum ApproovWebViewJavaScriptBridge {
             ? `${protectedState.headers[key]}, ${normalizedValue}` : normalizedValue;
         };
 
-        xhr.getResponseHeader = (name) => {
-          if (!protectedState.active) {
-            return nativeGetResponseHeader(name);
+        xhr.getResponseHeader = function (name) {
+          if (!protectedState.active || !arguments.length) {
+            return nativeGetResponseHeader(...arguments);
           }
 
+          const key = toDOMString(name).toLowerCase();
           if (protectedState.readyState < 2) return null;
-          const key = String(name).toLowerCase();
           if (["set-cookie", "set-cookie2"].includes(key)) return null;
           return protectedState.responseHeaders[key] ?? null;
         };
@@ -981,16 +988,16 @@ package enum ApproovWebViewJavaScriptBridge {
         };
 
         if (nativeOverrideMimeType) {
-          xhr.overrideMimeType = (mimeType) => {
-            if (!protectedState.active) {
-              nativeOverrideMimeType(mimeType);
+          xhr.overrideMimeType = function (mimeType) {
+            if (!protectedState.active || !arguments.length) {
+              nativeOverrideMimeType(...arguments);
               return;
             }
 
+            const value = toDOMString(mimeType).trim();
             if (protectedState.readyState === 3 || protectedState.readyState === 4) {
               throw new DOMException("MIME type cannot be changed after loading starts", "InvalidStateError");
             }
-            const value = String(mimeType).trim();
             protectedState.overrideMimeType = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+(?:\s*;.*)?$/.test(value)
               ? value : "application/octet-stream";
           };

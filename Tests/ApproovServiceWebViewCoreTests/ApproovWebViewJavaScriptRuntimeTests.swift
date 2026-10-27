@@ -608,4 +608,18 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRPreservesNativeArityAndDOMStringErrors() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest();
+            for (const operation of [() => xhr.open(), () => xhr.setRequestHeader(), () => xhr.getResponseHeader(), () => xhr.overrideMimeType()]) {
+                try { operation(); return false; } catch(error) { if (!(error instanceof TypeError)) return false; }
+            }
+            xhr.open('GET','https://api.example.com/');
+            try { xhr.setRequestHeader('x-test', Symbol('value')); return false; }
+            catch(error) { return error instanceof TypeError; }
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
