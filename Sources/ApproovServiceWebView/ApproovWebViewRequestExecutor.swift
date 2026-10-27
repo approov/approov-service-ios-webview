@@ -77,6 +77,11 @@ final actor ApproovWebViewRequestExecutor {
         }
         let mode = proxyRequest.mode ?? (proxyRequest.requestSource == .form ? "navigate" : "cors")
         let credentialsMode = proxyRequest.credentials ?? "same-origin"
+        // A page-controlled payload may not select navigation mode while asking
+        // for a readable response, which would bypass CORS checks.
+        if mode == "navigate" && proxyRequest.responseHandling != .navigation {
+            throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
+        }
         try ApproovWebViewBrowserPolicy.validateOptions(mode: mode, credentials: credentialsMode,
             redirect: proxyRequest.redirect ?? "follow", cache: proxyRequest.cache ?? "default",
             integrity: proxyRequest.integrity ?? "")
