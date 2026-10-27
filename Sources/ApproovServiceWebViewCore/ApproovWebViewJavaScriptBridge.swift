@@ -184,17 +184,19 @@ package enum ApproovWebViewJavaScriptBridge {
       };
 
       const serializeBody = async (bodyValue) => {
-        if (bodyValue == null) {
-          return null;
+        if (bodyValue == null) return { bodyBase64: null, contentType: null, byteLength: 0 };
+        let contentType = null;
+        if (bodyValue instanceof Document) {
+          contentType = bodyValue.contentType === "text/html" ? "text/html;charset=UTF-8" : "application/xml;charset=UTF-8";
+          bodyValue = new XMLSerializer().serializeToString(bodyValue);
         }
-
-        const request = new Request("https://approov.invalid/body", {
-          method: "POST",
-          body: bodyValue,
-        });
-
+        const request = new Request("https://approov.invalid/body", { method: "POST", body: bodyValue });
         const bodyBuffer = await readRequestBody(request);
-        return bodyBuffer.byteLength === 0 ? null : arrayBufferToBase64(bodyBuffer);
+        return {
+          bodyBase64: bodyBuffer.byteLength === 0 ? null : arrayBufferToBase64(bodyBuffer),
+          contentType: contentType || request.headers.get("content-type"),
+          byteLength: bodyBuffer.byteLength,
+        };
       };
 
       const makeFetchResponse = (nativeResponse, requestMethod) => {
@@ -885,6 +887,9 @@ package enum ApproovWebViewJavaScriptBridge {
           if (protectedState.readyState !== 1 || protectedState.sending) {
             throw new DOMException("XMLHttpRequest is not opened or send is already in progress", "InvalidStateError");
           }
+          if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
+            throw new TypeError("Streaming protected XMLHttpRequest bodies are not supported");
+          }
           protectedState.sending = true;
           protectedState.sendStarted = performance.now();
           scheduleProtectedTimeout();
@@ -894,15 +899,19 @@ package enum ApproovWebViewJavaScriptBridge {
           protectedState.requestId = requestId;
           void (async () => {
           try {
-            const bodyBase64 = await serializeBody(body);
+            const serializedBody = await serializeBody(["GET", "HEAD"].includes(protectedState.method) ? null : body);
             if (!isCurrent()) return;
+            const headers = { ...protectedState.headers };
+            if (serializedBody.contentType && !Object.prototype.hasOwnProperty.call(headers, "content-type")) {
+              headers["content-type"] = serializedBody.contentType;
+            }
             protectedState.sent = true;
             const nativeResponse = await nativeHandler.postMessage({
               requestId,
               url: protectedState.url,
               method: protectedState.method,
-              headers: protectedState.headers,
-              bodyBase64,
+              headers,
+              bodyBase64: serializedBody.bodyBase64,
               sourcePageURL: window.location.href,
               responseHandling: "response",
               requestSource: "xhr",

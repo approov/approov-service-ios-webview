@@ -274,4 +274,22 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRBodyTypesRetainGeneratedContentType() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const form = new FormData(); form.append('field','value');
+            for (const body of [form, new URLSearchParams({field:'value'}), new Blob(['abc'],{type:'application/test'})]) {
+                const xhr = new XMLHttpRequest(); xhr.open('POST','https://api.example.com/echo');
+                const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(body); await done;
+                const payload = JSON.parse(xhr.responseText);
+                const type = payload.headers['content-type'];
+                if (!type || (body instanceof FormData && !type.includes('boundary='))) return false;
+            }
+            const xhr = new XMLHttpRequest(); xhr.open('GET','https://api.example.com/echo');
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send('ignored'); await done;
+            return JSON.parse(xhr.responseText).bodyBase64 === null;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
