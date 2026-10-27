@@ -88,18 +88,24 @@ final actor ApproovWebViewRequestExecutor {
             )
         }
 
-        await synchronizeCookiesIntoNativeStorage()
+        let credentials = proxyRequest.credentials ?? "same-origin"
+        guard ["omit", "same-origin", "include"].contains(credentials) else {
+            throw ApproovWebViewBrowserPolicyError.unsupportedPolicy
+        }
+        if credentials != "omit" { await synchronizeCookiesIntoNativeStorage() }
         try initializeApproovIfNeeded()
 
         var request = requestContext.request
-        nativeCookieJar.prepare(&request, for: requestContext.requestURL)
+        if allowsCookies(credentials: credentials, url: requestContext.requestURL, context: context) {
+            nativeCookieJar.prepare(&request, for: requestContext.requestURL)
+        }
         ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &request)
 
         let data: Data
         let httpResponse: HTTPURLResponse
         do {
             (data, httpResponse) = try await performPinnedRequestFollowingRedirects(
-                request
+                request, credentials: credentials, context: context
             )
         } catch {
             // A successful redirect response may already have mutated the jar.
@@ -155,7 +161,7 @@ final actor ApproovWebViewRequestExecutor {
     /// the automatic follow and returns that proposal here, where the stale
     /// Cookie header is rebuilt for the destination URL.
     private func performPinnedRequestFollowingRedirects(
-        _ request: URLRequest
+        _ request: URLRequest, credentials: String, context: ApproovWebViewRequestContext
     ) async throws -> (Data, HTTPURLResponse) {
         var currentRequest = request
         var redirectCount = 0
@@ -175,7 +181,10 @@ final actor ApproovWebViewRequestExecutor {
                 throw ApproovWebViewBridgeError.nonHTTPResponse
             }
 
-            storeResponseCookies(from: httpResponse)
+            if let responseURL = httpResponse.url,
+               allowsCookies(credentials: credentials, url: responseURL, context: context) {
+                storeResponseCookies(from: httpResponse)
+            }
 
             guard var redirectRequest = proposedRedirect else {
                 return (data, httpResponse)
@@ -200,10 +209,10 @@ final actor ApproovWebViewRequestExecutor {
                 &redirectRequest, from: sourceURL,
                 endpoints: configuration.protectedEndpoints
             )
-            nativeCookieJar.prepareRedirect(
-                &redirectRequest,
-                for: redirectURL
-            )
+            redirectRequest.setValue(nil, forHTTPHeaderField: "Cookie")
+            if allowsCookies(credentials: credentials, url: redirectURL, context: context) {
+                nativeCookieJar.prepareRedirect(&redirectRequest, for: redirectURL)
+            }
             ApproovWebViewServiceMutator.setWebViewScope(
                 scopeID,
                 on: &redirectRequest
@@ -259,6 +268,17 @@ final actor ApproovWebViewRequestExecutor {
         }
 
         return (requestURL, request)
+    }
+
+    /// Without an authoritative site-for-cookies signal, restrict cookies to
+    /// same-origin frames and top-level documents. This is conservative for
+    /// legitimate cross-origin credentials:include requests.
+    private func allowsCookies(credentials: String, url: URL, context: ApproovWebViewRequestContext) -> Bool {
+        guard ApproovWebViewBrowserPolicy.sendsCredentials(credentials, url: url, sourceOrigin: context.frameOrigin),
+              !ApproovWebViewBrowserPolicy.isCrossOrigin(url, sourceOrigin: context.frameOrigin),
+              let top = context.mainDocumentURL,
+              ApproovWebViewBrowserPolicy.origin(of: top) == context.frameOrigin else { return false }
+        return true
     }
 
     /// Copies cookies from WebKit into native storage before each request.
