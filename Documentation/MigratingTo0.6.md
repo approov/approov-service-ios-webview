@@ -63,8 +63,6 @@ Simulated form navigation is restricted to the main frame.
 Iframe form navigation cannot replace the top-level document through the bridge.
 The form bridge can be disabled with `interceptForms: false`.
 
-The default request and response body limits are 10 MiB each.
-The default concurrent request limit is 16 per view.
 Unsupported browser policies reject protected requests.
 Cross-site credentialed requests, `no-cors`, manual redirects, nonempty integrity metadata, and streaming are unsupported.
 The native route does not share WebKit's HTTP cache or preflight cache.

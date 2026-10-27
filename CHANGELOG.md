@@ -5,6 +5,32 @@ All notable changes to this package are documented in this file.
 The format is based on Keep a Changelog and this package follows Semantic Versioning.
 Released versions are tagged in git.
 
+## [0.6.0] - Unreleased
+
+### Changed
+  * Installation now throws for invalid configuration, repeat installation, or shared ownership.
+  * SwiftUI hosts replace the WebView when content or configuration changes.
+  * Native requests use verified frame context, CORS checks, scoped cookie credentials, and referrer policy.
+  * The native path buffers finite API responses. Unsupported browser policies reject explicitly.
+  * Default limits are 10 MiB per body, 16 concurrent requests, and a 60-second resource deadline.
+  * Protected endpoint rules distinguish ports and use consistent encoded-path matching.
+
+### Fixed
+  * Preserve the WebView request hook across shared Approov initialization.
+  * Validate response-cookie domains, public suffixes, prefixes, and ordered deletion/replacement.
+  * Restrict redirect destinations and remove credentials before crossing origins.
+  * Preserve fetch response metadata, bodyless responses, cancellation, and request consumption.
+  * Correct XHR state, timeout, headers, body conversion, response conversion, and event behavior.
+  * Honor protected-form cancellation, submitters, targets, base URLs, and HTML defaults.
+  * Cancel native work on teardown and retain cookie-store ownership until mutations drain.
+  * Redact error details and bound bridge payloads and response accumulation.
+
+### Added
+  * Independent form-interception configuration and explicit shared-service ownership.
+  * Public Suffix List resource with attribution in THIRD-PARTY-NOTICES.txt.
+  * Simulator regression tests using real WebKit, cookie stores, and loopback transport.
+  * A simulator test script, CI workflow, migration guide, and production integration guide.
+
 ## [0.5.2] - 2026-09-02
 ### Fixed
   * Updated `approov-service-urlsession` to 3.5.12. Task-observer state now stays with each task,

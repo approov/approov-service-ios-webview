@@ -8,6 +8,7 @@ The package injects a JavaScript bridge into the page, intercepts protected `fet
 > Only endpoints declared in `protectedEndpoints` are proxied through native networking and protected by Approov.
 
 For an existing integration, see [migration to 0.6](Documentation/MigratingTo0.6.md).
+This branch contains the unreleased 0.6 implementation.
 
 ## Requirements
 
@@ -33,7 +34,7 @@ For an existing integration, see [migration to 0.6](Documentation/MigratingTo0.6
 dependencies: [
     .package(
         url: "https://github.com/approov/approov-service-ios-webview.git",
-        branch: "main"
+        branch: "0.6"
     )
 ]
 ```
@@ -375,6 +376,15 @@ Unsupported browser policies reject protected requests instead of silently chang
 Cross-site credentialed calls, `no-cors`, manual redirects, integrity checks, and streaming are unsupported.
 Native execution uses separate cache behavior from WebKit.
 See the [supported browser behavior](Documentation/ProductionIntegration.md#supported-browser-behavior) before choosing request policies.
+
+## Simulator regression tests
+
+Run `bash Scripts/test-simulator.sh` with an installed iPhone simulator runtime.
+Pass a simulator UDID as the first argument to select a particular runtime.
+The suite uses synthetic data, real WebKit and cookie stores, and local network
+fixtures. It does not require customer credentials or an Approov account.
+Test logs and the result bundle are saved under `.build/simulator-results`.
+The CI workflow runs the same command.
 Use a new view for a new installation policy.
 Changes to the SwiftUI host's content or configuration replace its WebView and cancel pending requests.
 
