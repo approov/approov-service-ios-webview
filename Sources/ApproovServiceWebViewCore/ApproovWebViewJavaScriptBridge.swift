@@ -1130,6 +1130,23 @@ package enum ApproovWebViewJavaScriptBridge {
       });
 
       if (formBridgeEnabled) {
+      const nativeEventPreventDefault = Event.prototype.preventDefault;
+      const nativeEventStopPropagation = Event.prototype.stopPropagation;
+      const nativeEventStopImmediatePropagation = Event.prototype.stopImmediatePropagation;
+      const trackedSubmitEvents = new WeakMap();
+      // Only tracked form dispatches add bridge work. All other events call
+      // the original WebKit method with the original receiver and arguments.
+      for (const [name, original] of [["preventDefault", nativeEventPreventDefault],
+          ["stopPropagation", nativeEventStopPropagation], ["stopImmediatePropagation", nativeEventStopImmediatePropagation]]) {
+        Event.prototype[name] = function (...args) {
+          const tracked = trackedSubmitEvents.get(this);
+          if (tracked) {
+            if (name === "preventDefault") tracked.cancel();
+            else tracked.reserve();
+          }
+          return original.apply(this, args);
+        };
+      }
       const handledSubmitEvents = new WeakSet();
       const inlineHandlerOriginals = new WeakMap();
       const recordSubmitterClick = (event) => {
@@ -1186,14 +1203,15 @@ package enum ApproovWebViewJavaScriptBridge {
           try {
             if (isNativeHandledForm(form, submitter)) {
               reserved = true;
-              preventDefault.call(event);
+              nativeEventPreventDefault.call(event);
             }
           } catch (error) {
             failure = error;
             reserved = true;
-            preventDefault.call(event);
+            nativeEventPreventDefault.call(event);
           }
         };
+        trackedSubmitEvents.set(event, { cancel: () => { cancelled = true; }, reserve });
         event.preventDefault = function () { cancelled = true; return preventDefault.call(this); };
         event.stopPropagation = function () { reserve(); return stopPropagation.call(this); };
         event.stopImmediatePropagation = function () { reserve(); return stopImmediatePropagation.call(this); };
@@ -1208,6 +1226,7 @@ package enum ApproovWebViewJavaScriptBridge {
         const finishTarget = root instanceof ShadowRoot ? root : window;
         finishTarget.addEventListener("submit", finish);
         setTimeout(() => {
+          trackedSubmitEvents.delete(event);
           finishTarget.removeEventListener("submit", finish);
           for (const { target, original, wrapped } of inlineHandlers) {
             const current = target.onsubmit;

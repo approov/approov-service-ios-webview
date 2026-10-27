@@ -636,4 +636,31 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testPrototypeEventMethodsHonorProtectedSubmitCancellation() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const outcomes = []; const cachedPreventDefault = Event.prototype.preventDefault;
+            for (const mode of ['prototype', 'cached', 'immediate']) {
+                document.body.innerHTML = '<form action="https://api.example.com/echo"></form>';
+                const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response'; let responses = 0;
+                form.addEventListener('approov:form-response', () => responses++);
+                form.addEventListener('submit', event => {
+                    if (mode === 'immediate') Event.prototype.stopImmediatePropagation.call(event);
+                    (mode === 'cached' ? cachedPreventDefault : Event.prototype.preventDefault).call(event);
+                }, true);
+                form.requestSubmit(); await new Promise(resolve => setTimeout(resolve, 20)); outcomes.push(`${mode}:${responses}`);
+            }
+            document.body.innerHTML = '<form method="post" action="https://api.example.com/echo"><input name="field" value="before"></form>';
+            const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
+            form.addEventListener('submit', event => Event.prototype.stopPropagation.call(event), true);
+            form.addEventListener('submit', () => form.querySelector('input').value = 'after');
+            const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
+            form.requestSubmit(); outcomes.push('stopped:' + atob((await done).bodyBase64));
+            const ordinary = new Event('ordinary', {cancelable:true}); Event.prototype.preventDefault.call(ordinary);
+            let brand = false; try { Event.prototype.preventDefault.call({}); } catch(error) { brand = error instanceof TypeError; }
+            outcomes.push('ordinary:' + (ordinary.defaultPrevented && brand)); return outcomes;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? [String], ["prototype:0", "cached:0", "immediate:0", "stopped:field=after", "ordinary:true"], "Event method outcomes: \(String(describing: result))")
+    }
+
 }
