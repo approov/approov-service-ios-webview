@@ -9,6 +9,10 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
                                    didReceive message: WKScriptMessage,
                                    replyHandler: @escaping (Any?, String?) -> Void) {
             let payload = message.body as? [String: Any] ?? [:]
+            if (payload["url"] as? String)?.contains("failure") == true {
+                replyHandler(nil, "fixture failure")
+                return
+            }
             let url = payload["url"] as? String ?? ""
             let status = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "status" })?.value.flatMap(Int.init) ?? 200
             replyHandler(["url": "https://api.example.com/final", "redirected": true,
@@ -132,6 +136,23 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             const controller = new AbortController(); controller.abort();
             try { await fetch('https://api.example.com/', {signal:controller.signal}); return false; }
             catch (error) { return error.name === 'AbortError'; }
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testFetchTransportFailureIsTypeError() async throws {
+        let controller = WKUserContentController()
+        let reply = Reply()
+        controller.addScriptMessageHandler(reply, contentWorld: .page, name: "bridge")
+        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")], xhrBridgeEnabled: true), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController = controller
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let result = try await view.callAsyncJavaScript("""
+            try { await fetch('https://api.example.com/failure'); return false; }
+            catch (error) { return error instanceof TypeError; }
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }

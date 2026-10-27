@@ -445,7 +445,10 @@ package enum ApproovWebViewJavaScriptBridge {
           if (signal.aborted) throw signal.reason || new DOMException("Aborted", "AbortError");
           payload.requestId = requestId;
           sent = true;
-          const nativeResponse = await Promise.race([nativeHandler.postMessage(payload), aborted]);
+          const nativeReply = Promise.resolve(nativeHandler.postMessage(payload)).catch(() => {
+            throw new TypeError("Protected fetch failed");
+          });
+          const nativeResponse = await Promise.race([nativeReply, aborted]);
           return makeFetchResponse(nativeResponse, request.method);
         } finally {
           signal.removeEventListener("abort", onAbort);
