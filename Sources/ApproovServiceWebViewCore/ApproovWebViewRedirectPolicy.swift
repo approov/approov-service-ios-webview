@@ -14,13 +14,13 @@ package enum ApproovWebViewRedirectPolicy {
         let sameOrigin = source.host?.lowercased() == destination.host?.lowercased()
             && port(source) == port(destination)
         if !sameOrigin {
-            // Do not assume arbitrary application headers are safe to disclose.
-            // The destination is reprocessed by Approov after this step.
-            let safe = Set(["accept", "accept-language", "content-type", "user-agent"])
-            for name in request.allHTTPHeaderFields?.keys ?? Dictionary<String, String>().keys {
-                if !safe.contains(name.lowercased()) {
-                    request.setValue(nil, forHTTPHeaderField: name)
-                }
+            // A 307/308 may preserve a body containing secrets. No body or
+            // original header is authorized for transfer to another origin.
+            guard (request.httpBody?.isEmpty ?? true), request.httpBodyStream == nil else {
+                throw URLError(.unsupportedURL)
+            }
+            for name in Array(request.allHTTPHeaderFields?.keys ?? Dictionary<String, String>().keys) {
+                request.setValue(nil, forHTTPHeaderField: name)
             }
         }
     }

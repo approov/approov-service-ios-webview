@@ -200,18 +200,19 @@ final actor ApproovWebViewRequestExecutor {
     ) async throws -> (Data, HTTPURLResponse, Bool) {
         var currentRequest = request
         var redirectCount = 0
+        var remainingPageHeaders = pageHeaders
 
         while true {
             guard let currentURL = currentRequest.url else { throw URLError(.badURL) }
             let crossOrigin = ApproovWebViewBrowserPolicy.isCrossOrigin(currentURL, sourceOrigin: context.frameOrigin)
             if mode == "same-origin" && crossOrigin { throw ApproovWebViewBrowserPolicyError.corsRejected }
-            let method = (currentRequest.httpMethod ?? "GET").uppercased()
-            if mode == "cors" && crossOrigin && ApproovWebViewBrowserPolicy.needsPreflight(method: method, headers: pageHeaders) {
+            let method = currentRequest.httpMethod ?? "GET"
+            if mode == "cors" && crossOrigin && ApproovWebViewBrowserPolicy.needsPreflight(method: method, headers: remainingPageHeaders) {
                 var preflight = URLRequest(url: currentURL)
                 preflight.httpMethod = "OPTIONS"
                 preflight.setValue(context.frameOrigin, forHTTPHeaderField: "Origin")
                 preflight.setValue(method, forHTTPHeaderField: "Access-Control-Request-Method")
-                let names = ApproovWebViewBrowserPolicy.unsafeHeaderNames(pageHeaders)
+                let names = ApproovWebViewBrowserPolicy.unsafeHeaderNames(remainingPageHeaders)
                 if !names.isEmpty { preflight.setValue(names.joined(separator: ","), forHTTPHeaderField: "Access-Control-Request-Headers") }
                 preflight.httpShouldHandleCookies = false
                 ApproovWebViewServiceMutator.setWebViewScope(scopeID, on: &preflight)
@@ -221,7 +222,7 @@ final actor ApproovWebViewRequestExecutor {
                 }
                 try ApproovWebViewBrowserPolicy.checkPreflight(status: response.statusCode,
                     headers: normalizeHeaders(response.allHeaderFields), sourceOrigin: context.frameOrigin,
-                    credentials: credentials, method: method, requestHeaders: pageHeaders)
+                    credentials: credentials, method: method, requestHeaders: remainingPageHeaders)
             }
             let (data, response, proposedRedirect) = try await performSignedRequest(currentRequest)
             guard let httpResponse = response as? HTTPURLResponse else {
@@ -261,6 +262,13 @@ final actor ApproovWebViewRequestExecutor {
                 &redirectRequest, from: sourceURL,
                 endpoints: configuration.protectedEndpoints
             )
+            // Keep only page-controlled headers that remain after Foundation's
+            // redirect transformations and our cross-origin sanitization.
+            remainingPageHeaders = remainingPageHeaders.reduce(into: [:]) { result, entry in
+                if let value = redirectRequest.value(forHTTPHeaderField: entry.key) {
+                    result[entry.key] = value
+                }
+            }
             redirectRequest.setValue(nil, forHTTPHeaderField: "Referer")
             redirectRequest.setValue(try ApproovWebViewBrowserPolicy.referrer(
                 pageURL: context.frameURL, sourceOrigin: context.frameOrigin, destination: redirectURL,
