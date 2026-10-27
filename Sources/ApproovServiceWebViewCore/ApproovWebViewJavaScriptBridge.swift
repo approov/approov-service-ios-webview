@@ -527,29 +527,32 @@ package enum ApproovWebViewJavaScriptBridge {
         xhr[propertyName] = value;
       };
 
-      const applyProtectedXHRResponseBody = (protectedState, responseBytes) => {
-        switch (protectedState.responseType) {
-          case "arraybuffer":
-            protectedState.response = responseBytes.buffer;
-            protectedState.responseText = "";
-            break;
-          case "blob":
-            protectedState.response = new Blob([responseBytes]);
-            protectedState.responseText = "";
-            break;
-          case "json": {
-            const textValue = textDecoder.decode(responseBytes);
-            protectedState.responseText = textValue;
-            protectedState.response = textValue ? JSON.parse(textValue) : null;
-            break;
+      const applyProtectedXHRResponseBody = (state, responseBytes) => {
+        const mime = state.overrideMimeType || state.responseHeaders["content-type"] || "text/xml";
+        const essence = mime.split(";", 1)[0].trim().toLowerCase();
+        const charset = /charset\s*=\s*["']?([^;"'\s]+)/i.exec(mime)?.[1];
+        let decoder;
+        try { decoder = new TextDecoder(state.responseType === "json" ? "utf-8" : charset || "utf-8"); }
+        catch (_) { decoder = new TextDecoder(); }
+        const text = decoder.decode(responseBytes);
+        state.responseText = text;
+        state.responseXML = null;
+        if (state.responseType === "" || state.responseType === "document") {
+          const xml = essence === "text/xml" || essence === "application/xml" || essence.endsWith("+xml");
+          const html = essence === "text/html" && state.responseType === "document";
+          if (xml || html) {
+            const document = new DOMParser().parseFromString(text, html ? "text/html" : "application/xml");
+            if (html || document.getElementsByTagName("parsererror").length === 0) state.responseXML = document;
           }
-          case "":
-          case "text":
-          default: {
-            const textValue = textDecoder.decode(responseBytes);
-            protectedState.responseText = textValue;
-            protectedState.response = textValue;
-          }
+        }
+        switch (state.responseType) {
+          case "arraybuffer": state.response = responseBytes.buffer; break;
+          case "blob": state.response = new Blob([responseBytes], { type: mime.toLowerCase() }); break;
+          case "json":
+            try { state.response = JSON.parse(text); } catch (_) { state.response = null; }
+            break;
+          case "document": state.response = state.responseXML; break;
+          default: state.response = text;
         }
       };
 
@@ -585,6 +588,7 @@ package enum ApproovWebViewJavaScriptBridge {
           response: null,
           responseHeaders: {},
           responseText: "",
+          responseXML: null,
           responseType: getNativeXMLHttpRequestProperty(xhr, "responseType") || "",
           responseURL: "",
           status: 0,
@@ -635,18 +639,20 @@ package enum ApproovWebViewJavaScriptBridge {
             configurable: true,
             enumerable: true,
             get() {
-              return protectedState.active
-                ? protectedState.response
-                : getNativeXMLHttpRequestProperty(xhr, "response");
+              if (!protectedState.active) return getNativeXMLHttpRequestProperty(xhr, "response");
+              if (protectedState.responseType !== "" && protectedState.responseType !== "text" && protectedState.readyState !== 4) return null;
+              return protectedState.response;
             },
           },
           responseText: {
             configurable: true,
             enumerable: true,
             get() {
-              return protectedState.active
-                ? protectedState.responseText
-                : getNativeXMLHttpRequestProperty(xhr, "responseText");
+              if (!protectedState.active) return getNativeXMLHttpRequestProperty(xhr, "responseText");
+              if (!["", "text"].includes(protectedState.responseType)) {
+                throw new DOMException("responseText is only available for text responses", "InvalidStateError");
+              }
+              return protectedState.readyState < 3 ? "" : protectedState.responseText;
             },
           },
           responseType: {
@@ -659,7 +665,11 @@ package enum ApproovWebViewJavaScriptBridge {
             },
             set(value) {
               if (protectedState.active) {
-                protectedState.responseType = value || "";
+                if (protectedState.readyState === 3 || protectedState.readyState === 4) {
+                  throw new DOMException("responseType cannot be changed after loading starts", "InvalidStateError");
+                }
+                const type = String(value);
+                if (["", "text", "json", "arraybuffer", "blob", "document"].includes(type)) protectedState.responseType = type;
                 return;
               }
 
@@ -679,9 +689,11 @@ package enum ApproovWebViewJavaScriptBridge {
             configurable: true,
             enumerable: true,
             get() {
-              return protectedState.active
-                ? null
-                : getNativeXMLHttpRequestProperty(xhr, "responseXML");
+              if (!protectedState.active) return getNativeXMLHttpRequestProperty(xhr, "responseXML");
+              if (!["", "document"].includes(protectedState.responseType)) {
+                throw new DOMException("responseXML is unavailable for this responseType", "InvalidStateError");
+              }
+              return protectedState.readyState === 4 ? protectedState.responseXML : null;
             },
           },
           timeout: {
@@ -768,6 +780,9 @@ package enum ApproovWebViewJavaScriptBridge {
             }
           }
 
+          const savedResponseType = xhr.responseType;
+          const savedTimeout = xhr.timeout;
+          const savedCredentials = xhr.withCredentials;
           cancelProtectedRequest();
           protectedState.generation += 1;
           protectedState.aborted = false;
@@ -784,14 +799,13 @@ package enum ApproovWebViewJavaScriptBridge {
           protectedState.response = null;
           protectedState.responseHeaders = {};
           protectedState.responseText = "";
-          protectedState.responseType = getNativeXMLHttpRequestProperty(xhr, "responseType") || "";
+          protectedState.responseType = savedResponseType;
           protectedState.responseURL = "";
           protectedState.status = 0;
           protectedState.statusText = "";
-          protectedState.timeout = getNativeXMLHttpRequestProperty(xhr, "timeout") || 0;
+          protectedState.timeout = savedTimeout;
           protectedState.url = resolvedURL;
-          protectedState.withCredentials =
-            getNativeXMLHttpRequestProperty(xhr, "withCredentials") || false;
+          protectedState.withCredentials = savedCredentials;
 
           if (!protectedURL) {
             logUnprotectedRequestBypass("xhr", resolvedURL);
@@ -832,7 +846,10 @@ package enum ApproovWebViewJavaScriptBridge {
             return nativeGetResponseHeader(name);
           }
 
-          return protectedState.responseHeaders[name.toLowerCase()] || null;
+          if (protectedState.readyState < 2) return null;
+          const key = String(name).toLowerCase();
+          if (["set-cookie", "set-cookie2"].includes(key)) return null;
+          return protectedState.responseHeaders[key] ?? null;
         };
 
         xhr.getAllResponseHeaders = () => {
@@ -840,9 +857,12 @@ package enum ApproovWebViewJavaScriptBridge {
             return nativeGetAllResponseHeaders();
           }
 
+          if (protectedState.readyState < 2) return "";
           return Object.entries(protectedState.responseHeaders)
+            .filter(([name]) => !["set-cookie", "set-cookie2"].includes(name))
+            .sort(([a], [b]) => a.localeCompare(b))
             .map(([name, value]) => `${name}: ${value}`)
-            .join("\r\n");
+            .map(line => line + "\r\n").join("");
         };
 
         if (nativeOverrideMimeType) {
@@ -852,7 +872,10 @@ package enum ApproovWebViewJavaScriptBridge {
               return;
             }
 
-            protectedState.overrideMimeType = mimeType;
+            if (protectedState.readyState === 3 || protectedState.readyState === 4) {
+              throw new DOMException("MIME type cannot be changed after loading starts", "InvalidStateError");
+            }
+            protectedState.overrideMimeType = String(mimeType);
           };
         }
 

@@ -46,11 +46,11 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             let url = payload["url"] as? String ?? ""
             let status = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "status" })?.value.flatMap(Int.init) ?? 200
             let delay = URLComponents(string: url)?.queryItems?.first(where: { $0.name == "delay" })?.value.flatMap(Double.init) ?? 0
-            let responseBody = url.contains("/echo")
+            let responseBody = url.contains("/invalid-json") ? Data("invalid json".utf8).base64EncodedString() : url.contains("/echo")
                 ? (try? JSONSerialization.data(withJSONObject: payload))?.base64EncodedString() ?? "e30=" : "e30="
             let respond = {
             replyHandler(["url": "https://api.example.com/final", "redirected": true,
-                          "status": status, "statusText": "OK", "headers": [:],
+                          "status": status, "statusText": "OK", "headers": ["content-type": "application/json"],
                           "bodyBase64": responseBody], nil)
             }
             if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000, execute: respond) }
@@ -288,6 +288,21 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             const xhr = new XMLHttpRequest(); xhr.open('GET','https://api.example.com/echo');
             const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send('ignored'); await done;
             return JSON.parse(xhr.responseText).bodyBase64 === null;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testXHRResponseConversionAndGetterErrors() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); xhr.open('GET','https://api.example.com/invalid-json');
+            xhr.responseType = 'json'; let failed = false; xhr.onerror = () => failed = true;
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
+            let getterError = false;
+            try { void xhr.responseText; } catch(e) { getterError = e.name === 'InvalidStateError'; }
+            const blob = new XMLHttpRequest(); blob.open('GET','https://api.example.com/'); blob.responseType = 'blob';
+            const blobDone = new Promise(resolve => blob.onloadend = resolve); blob.send(); await blobDone;
+            return !failed && xhr.status === 200 && xhr.response === null && getterError && blob.response.type === 'application/json';
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }
