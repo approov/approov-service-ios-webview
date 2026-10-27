@@ -1034,20 +1034,70 @@ package enum ApproovWebViewJavaScriptBridge {
         submitterByForm.set(clickedElement.form, clickedElement);
       }, true);
 
+      // Reserve the browser default only after ordinary submit listeners run.
+      // A task observes final synchronous mutations; microtasks can run between
+      // trusted event listeners and are too early for this purpose.
       document.addEventListener("submit", (event) => {
         const form = event.target;
-        if (!(form instanceof HTMLFormElement)) {
-          return;
-        }
-
+        if (!(form instanceof HTMLFormElement) || !event.cancelable) return;
         const submitter = event.submitter || submitterByForm.get(form) || null;
-        if (!isNativeHandledForm(form, submitter)) {
-          return;
-        }
-
-        event.preventDefault();
-        void proxyFormSubmission(form, submitter);
+        let cancelled = event.defaultPrevented;
+        let reserved = false;
+        let failure = null;
+        const preventDefault = event.preventDefault;
+        const stopPropagation = event.stopPropagation;
+        const stopImmediatePropagation = event.stopImmediatePropagation;
+        const reserve = () => {
+          if (reserved) return;
+          cancelled ||= event.defaultPrevented;
+          try {
+            if (isNativeHandledForm(form, submitter)) {
+              reserved = true;
+              preventDefault.call(event);
+            }
+          } catch (error) {
+            failure = error;
+            reserved = true;
+            preventDefault.call(event);
+          }
+        };
+        event.preventDefault = function () { cancelled = true; return preventDefault.call(this); };
+        event.stopPropagation = function () { reserve(); return stopPropagation.call(this); };
+        event.stopImmediatePropagation = function () { reserve(); return stopImmediatePropagation.call(this); };
+        const returnValue = Object.getOwnPropertyDescriptor(Event.prototype, "returnValue");
+        if (returnValue?.set) Object.defineProperty(event, "returnValue", {
+          configurable: true,
+          get() { return returnValue.get.call(this); },
+          set(value) { if (value === false) cancelled = true; returnValue.set.call(this, value); },
+        });
+        const finish = candidate => { if (candidate === event) reserve(); };
+        window.addEventListener("submit", finish);
+        setTimeout(() => {
+          window.removeEventListener("submit", finish);
+          if (cancelled || !reserved) return;
+          if (failure) { handleNativeFormError(form, failure); return; }
+          try {
+            if (isNativeHandledForm(form, submitter)) void proxyFormSubmission(form, submitter);
+            else submitFormWithNativeDefault(form, submitter);
+          } catch (error) { handleNativeFormError(form, error); }
+        }, 0);
       }, true);
+
+      const submitFormWithNativeDefault = (form, submitter) => {
+        const attributes = ["action", "method", "enctype", "target"];
+        const saved = attributes.map(name => form.getAttribute(name));
+        const control = submitter && !submitter.disabled && submitter.name ? document.createElement("input") : null;
+        try {
+          for (const name of attributes) {
+            if (submitter?.hasAttribute(`form${name}`)) form.setAttribute(name, submitter.getAttribute(`form${name}`));
+          }
+          if (control) { control.type = "hidden"; control.name = submitter.name; control.value = submitter.value; form.append(control); }
+          originalFormSubmit.call(form);
+        } finally {
+          control?.remove();
+          attributes.forEach((name, index) => saved[index] === null ? form.removeAttribute(name) : form.setAttribute(name, saved[index]));
+        }
+      };
 
       // `form.submit()` bypasses the normal submit event, so it must be wrapped
       // explicitly if programmatic submission should also be protected.

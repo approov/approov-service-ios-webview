@@ -361,4 +361,23 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testSubmitListenersCanCancelAndMutateProtectedForms() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const cancelled = document.createElement('form'); cancelled.action = 'https://api.example.com/echo';
+            cancelled.dataset.approovSubmitMode = 'response'; document.body.append(cancelled);
+            let responses = 0; cancelled.addEventListener('approov:form-response', () => responses++);
+            cancelled.addEventListener('submit', event => event.preventDefault()); cancelled.requestSubmit();
+            await new Promise(resolve => setTimeout(resolve, 20)); if (responses) return false;
+            const form = document.createElement('form'); form.action = 'https://api.example.com/echo';
+            form.dataset.approovSubmitMode = 'response'; form.method = 'post';
+            const field = document.createElement('input'); field.name = 'field'; field.value = 'before'; form.append(field); document.body.append(form);
+            form.addEventListener('submit', () => { field.value = 'after'; form.action += '?mutated'; });
+            const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
+            form.requestSubmit(); const payload = await done;
+            return payload.url.endsWith('?mutated') && atob(payload.bodyBase64) === 'field=after';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
