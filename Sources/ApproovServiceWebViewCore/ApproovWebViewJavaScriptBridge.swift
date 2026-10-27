@@ -277,10 +277,8 @@ package enum ApproovWebViewJavaScriptBridge {
       };
 
       const resolveFormTarget = (form, submitter) => {
-        const rawTarget = submitter?.getAttribute("formtarget")
-          || form.getAttribute("target")
-          || "_self";
-        return rawTarget.toLowerCase();
+        const target = formAttribute(form, submitter, "target", "formtarget");
+        return (target === null ? document.querySelector("base[target]")?.getAttribute("target") || "_self" : target || "_self").toLowerCase();
       };
 
       const resolveFormResponseHandling = (form) => {
@@ -417,7 +415,10 @@ package enum ApproovWebViewJavaScriptBridge {
         // Current-frame form submission is the production-safe path that can
         // be modeled with `loadSimulatedRequest(...)`.
         const target = resolveFormTarget(form, submitter);
-        return target === "" || target === "_self";
+        if (target !== "_self") {
+          throw new DOMException("Protected form targets other than _self are not supported", "NotSupportedError");
+        }
+        return true;
       };
 
       const handleNativeFormResponse = (form, nativeResponse) => {

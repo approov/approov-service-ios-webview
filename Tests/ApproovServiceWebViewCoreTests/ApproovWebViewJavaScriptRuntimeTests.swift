@@ -435,4 +435,19 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testFormHonorsBaseTargetAndExplicitSelfOverride() async throws {
+        let view = await fixture()
+        await load(view, html: "<html><head><base target='_blank'></head><body></body></html>")
+        let result = try await view.callAsyncJavaScript("""
+            document.body.innerHTML = '<form action="https://api.example.com/echo"></form>';
+            const form = document.querySelector('form'); form.dataset.approovSubmitMode = 'response';
+            const failed = new Promise(resolve => form.addEventListener('approov:form-error', event => resolve(event.detail.message), {once:true}));
+            form.requestSubmit(); if (!(await failed).includes('targets')) return false;
+            form.target = '_self';
+            const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(event.detail.status), {once:true}));
+            form.requestSubmit(); return await done === 200;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
