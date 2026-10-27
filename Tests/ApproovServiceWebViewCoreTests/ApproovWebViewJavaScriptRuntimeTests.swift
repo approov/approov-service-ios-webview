@@ -4,6 +4,36 @@ import WebKit
 
 @MainActor
 final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
+    private final class Navigation: NSObject, WKNavigationDelegate {
+        let completed: XCTestExpectation
+        init(_ completed: XCTestExpectation) { self.completed = completed }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { completed.fulfill() }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { completed.fulfill() }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { completed.fulfill() }
+    }
+
+    private func load(_ view: WKWebView, html: String = "<html></html>") async {
+        let completed = expectation(description: "WKWebView document loaded")
+        let navigation = Navigation(completed)
+        view.navigationDelegate = navigation
+        view.loadHTMLString(html, baseURL: URL(string: "https://shop.example.com/"))
+        await fulfillment(of: [completed], timeout: 5)
+        view.navigationDelegate = nil
+    }
+
+    private func fixture(maxRequestBodyBytes: Int = 10 * 1024 * 1024) async -> WKWebView {
+        let controller = WKUserContentController()
+        controller.addScriptMessageHandler(Reply(), contentWorld: .page, name: "bridge")
+        controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(
+            handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
+            xhrBridgeEnabled: true, maxRequestBodyBytes: maxRequestBodyBytes), injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController = controller
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        await load(view)
+        return view
+    }
+
     private final class Reply: NSObject, WKScriptMessageHandlerWithReply {
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage,
@@ -34,8 +64,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             let configuration = WKWebViewConfiguration()
             configuration.userContentController = controller
             let view = WKWebView(frame: .zero, configuration: configuration)
-            view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
-            try await Task.sleep(nanoseconds: 300_000_000)
+            await load(view)
             let result = try await view.callAsyncJavaScript("const r = await fetch('https://api.example.com/test'); return r.status;", arguments: [:], in: nil, contentWorld: .page)
             XCTAssertEqual(result as? Int, 200, "handler: \(name)")
         }
@@ -49,8 +78,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
-        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await load(view)
         let result = try await view.callAsyncJavaScript("""
             for (const status of [204, 205, 304]) {
                 const response = await fetch(`https://api.example.com/?status=${status}`);
@@ -70,8 +98,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
-        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await load(view)
         let result = try await view.callAsyncJavaScript("""
             const response = await fetch('https://api.example.com/test');
             const copy = response.clone();
@@ -92,8 +119,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
-        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await load(view)
         let result = try await view.callAsyncJavaScript("""
             const request = new Request('https://api.example.com/', {method:'POST', body:'body'});
             await fetch(request);
@@ -110,8 +136,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
-        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await load(view)
         let result = try await view.callAsyncJavaScript("""
             for (const options of [{mode:'no-cors'}, {redirect:'manual'}, {integrity:'sha256-AAAA'}]) {
                 try { await fetch('https://api.example.com/', options); return false; }
@@ -130,8 +155,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
-        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await load(view)
         let result = try await view.callAsyncJavaScript("""
             const controller = new AbortController(); controller.abort();
             try { await fetch('https://api.example.com/', {signal:controller.signal}); return false; }
@@ -148,11 +172,20 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
-        view.loadHTMLString("<html></html>", baseURL: URL(string: "https://shop.example.com/"))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await load(view)
         let result = try await view.callAsyncJavaScript("""
             try { await fetch('https://api.example.com/failure'); return false; }
             catch (error) { return error instanceof TypeError; }
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testRequestBodyLimitRejectsBeforeNativeDispatch() async throws {
+        let view = await fixture(maxRequestBodyBytes: 4)
+        let result = try await view.callAsyncJavaScript("""
+            const exact = await fetch('https://api.example.com/', {method:'POST', body:'1234'});
+            try { await fetch('https://api.example.com/', {method:'POST', body:'12345'}); return false; }
+            catch (error) { return exact.status === 200 && error instanceof TypeError; }
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }

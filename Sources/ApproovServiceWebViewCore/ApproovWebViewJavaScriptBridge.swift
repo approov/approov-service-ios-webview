@@ -12,7 +12,8 @@ package enum ApproovWebViewJavaScriptBridge {
     package static func scriptSource(
         handlerName: String,
         protectedEndpoints: [ApproovWebViewProtectedEndpoint],
-        xhrBridgeEnabled: Bool
+        xhrBridgeEnabled: Bool,
+        maxRequestBodyBytes: Int = 10 * 1024 * 1024
     ) -> String {
         template
             .replacingOccurrences(of: handlerPlaceholder, with: String(decoding: try! JSONEncoder().encode(handlerName), as: UTF8.self))
@@ -24,6 +25,7 @@ package enum ApproovWebViewJavaScriptBridge {
                 of: xhrBridgeEnabledPlaceholder,
                 with: xhrBridgeEnabled ? "true" : "false"
             )
+            .replacingOccurrences(of: "__APPROOV_MAX_REQUEST_BODY_BYTES__", with: String(max(0, maxRequestBodyBytes)))
     }
 
     private static func protectedEndpointsJSON(
@@ -48,6 +50,7 @@ package enum ApproovWebViewJavaScriptBridge {
       const nativeHandler = window.webkit?.messageHandlers?.[__APPROOV_BRIDGE_HANDLER__];
       const protectedEndpoints = __APPROOV_PROTECTED_ENDPOINTS__;
       const xhrBridgeEnabled = __APPROOV_XHR_BRIDGE_ENABLED__;
+      const maxRequestBodyBytes = __APPROOV_MAX_REQUEST_BODY_BYTES__;
       if (!nativeHandler || typeof nativeHandler.postMessage !== "function") {
         return;
       }
@@ -123,6 +126,33 @@ package enum ApproovWebViewJavaScriptBridge {
         }
       };
 
+      // The bridge supports finite, buffered bodies. Stop reading as soon as
+      // the byte limit is crossed, before allocating the base64 representation.
+      const readRequestBody = async (request) => {
+        if (!request.body) return new ArrayBuffer(0);
+        const reader = request.body.getReader();
+        const chunks = [];
+        let length = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            length += value.byteLength;
+            if (length > maxRequestBodyBytes) {
+              await reader.cancel("Protected request body exceeds the configured byte limit");
+              throw new TypeError("Protected request body exceeds the configured byte limit");
+            }
+            chunks.push(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        const bytes = new Uint8Array(length);
+        let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        return bytes.buffer;
+      };
+
       const serializeRequest = async (request, requestSource, responseHandling) => {
         const headers = {};
         request.headers.forEach((value, key) => {
@@ -131,7 +161,7 @@ package enum ApproovWebViewJavaScriptBridge {
 
         let bodyBase64 = null;
         if (request.method !== "GET" && request.method !== "HEAD") {
-          const bodyBuffer = await request.arrayBuffer();
+          const bodyBuffer = await readRequestBody(request);
           bodyBase64 = bodyBuffer.byteLength === 0 ? null : arrayBufferToBase64(bodyBuffer);
         }
 
@@ -163,7 +193,7 @@ package enum ApproovWebViewJavaScriptBridge {
           body: bodyValue,
         });
 
-        const bodyBuffer = await request.arrayBuffer();
+        const bodyBuffer = await readRequestBody(request);
         return bodyBuffer.byteLength === 0 ? null : arrayBufferToBase64(bodyBuffer);
       };
 
