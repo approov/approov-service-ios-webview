@@ -15,47 +15,68 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         let configuration = ApproovWebViewConfiguration(
             approovConfig: "synthetic-config", protectedEndpoints: [],
             allowedOrigins: ["https://shop.example.com"], debugLoggingEnabled: false)
-        var coordinator: ApproovWebViewCoordinator? = ApproovWebViewFactory.makeCoordinator(
-            configuration: configuration)
-        var first: WKWebView? = makeView(store: store)
-        let releasedView = WeakReference(first)
-        try ApproovWebViewFactory.install(
-            on: try XCTUnwrap(first), configuration: configuration, coordinator: coordinator)
-        let lease = WeakReference(coordinator?.storeLifetimeOwner)
+        var coordinator: ApproovWebViewCoordinator?
+        var first: WKWebView?
+        let releasedView = WeakReference(nil)
+        let releasedCoordinator = WeakReference(nil)
+        let releasedBridge = WeakReference(nil)
+        let lease = WeakReference(nil)
         let leaseReleased = expectation(description: "store lease released after cookie work")
-        objc_setAssociatedObject(
-            try XCTUnwrap(coordinator?.storeLifetimeOwner), &Self.lifetimeProbeKey,
-            LeaseReleaseProbe { leaseReleased.fulfill() }, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-
         let enteredFlush = expectation(description: "old cookie flush started")
         let adapter = SuspendedCookieStore(enteredFlush: enteredFlush)
-        var flush: Task<Void, Never>? = try beginFlush(
-            owner: XCTUnwrap(coordinator?.storeLifetimeOwner), adapter: adapter)
+        var flush: Task<Void, Never>?
+        // WKWebView.configuration returns Objective-C objects. Keep its temporary
+        // configuration/controller copies inside a pool, rather than the async test.
+        try autoreleasepool {
+            coordinator = ApproovWebViewFactory.makeCoordinator(configuration: configuration)
+            first = makeView(store: store)
+            releasedView.value = first
+            releasedCoordinator.value = coordinator
+            try ApproovWebViewFactory.install(
+                on: XCTUnwrap(first), configuration: configuration, coordinator: coordinator)
+            lease.value = coordinator?.storeLifetimeOwner
+            objc_setAssociatedObject(
+                try XCTUnwrap(coordinator?.storeLifetimeOwner), &Self.lifetimeProbeKey,
+                LeaseReleaseProbe { leaseReleased.fulfill() }, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            flush = try beginFlush(
+                owner: XCTUnwrap(coordinator?.storeLifetimeOwner), adapter: adapter, bridgeProbe: releasedBridge)
+        }
         await fulfillment(of: [enteredFlush], timeout: 5)
 
         // The view and its coordinator are gone, but the old asynchronous cookie
         // reconciliation still owns its store lease through the cookie bridge.
-        first = nil
-        coordinator = nil
-        XCTAssertNil(releasedView.value)
-        XCTAssertNotNil(lease.value)
+        autoreleasepool {
+            first = nil
+            coordinator = nil
+            XCTAssertNil(releasedView.value)
+            XCTAssertNil(releasedCoordinator.value, "The old coordinator still retains its installation lease")
+            XCTAssertNotNil(releasedBridge.value, "The suspended flush must retain its cookie bridge")
+            XCTAssertNotNil(lease.value)
+        }
         let replacement = makeView(store: store)
-        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: replacement, configuration: configuration)) {
-            error in
-            XCTAssertEqual(error as? ApproovWebViewInstallationError, .dataStoreAlreadyInUse)
+        autoreleasepool {
+            XCTAssertThrowsError(try ApproovWebViewFactory.install(on: replacement, configuration: configuration)) {
+                error in
+                XCTAssertEqual(error as? ApproovWebViewInstallationError, .dataStoreAlreadyInUse)
+            }
         }
         XCTAssertTrue(replacement.configuration.userContentController.userScripts.isEmpty)
 
         // Cancellation must not allow a second writer before the suspended
         // WebKit mutation finishes. Cookie reconciliation drains before release.
         flush?.cancel()
-        XCTAssertThrowsError(try ApproovWebViewFactory.install(on: replacement, configuration: configuration)) {
-            error in
-            XCTAssertEqual(error as? ApproovWebViewInstallationError, .dataStoreAlreadyInUse)
+        autoreleasepool {
+            XCTAssertThrowsError(try ApproovWebViewFactory.install(on: replacement, configuration: configuration)) {
+                error in
+                XCTAssertEqual(error as? ApproovWebViewInstallationError, .dataStoreAlreadyInUse)
+            }
         }
         adapter.finishFlush()
-        await flush?.value
-        flush = nil
+        await drain(&flush)
+        autoreleasepool {
+            XCTAssertNil(releasedCoordinator.value, "Coordinator survived the raw view")
+            XCTAssertNil(releasedBridge.value, "Completed flush still retains its cookie bridge")
+        }
         await fulfillment(of: [leaseReleased], timeout: 5)
         XCTAssertNil(lease.value)
 
@@ -72,8 +93,18 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         return WKWebView(frame: .zero, configuration: configuration)
     }
 
-    private func beginFlush(owner: AnyObject, adapter: SuspendedCookieStore) throws -> Task<Void, Never> {
+    private func drain(_ task: inout Task<Void, Never>?) async {
+        let running = task
+        task = nil
+        await running?.value
+    }
+
+    private func beginFlush(
+        owner: AnyObject, adapter: SuspendedCookieStore,
+        bridgeProbe: WeakReference
+    ) throws -> Task<Void, Never> {
         let bridge = ApproovWebViewCookieBridge(storeAdapter: adapter, lifetimeOwner: owner)
+        bridgeProbe.value = bridge
         let cookie = try XCTUnwrap(
             HTTPCookie(properties: [
                 .name: "session", .value: "synthetic-session", .domain: "shop.example.com", .path: "/",
