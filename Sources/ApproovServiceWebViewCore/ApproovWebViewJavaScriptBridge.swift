@@ -573,6 +573,8 @@ package enum ApproovWebViewJavaScriptBridge {
           generation: 0,
           requestId: null,
           sent: false,
+          timeoutTimer: null,
+          sendStarted: 0,
           headers: {},
           method: "GET",
           overrideMimeType: null,
@@ -591,7 +593,10 @@ package enum ApproovWebViewJavaScriptBridge {
 
         const changeProtectedReadyState = (nextState) => {
           protectedState.readyState = nextState;
-          if (nextState === 4) protectedState.sending = false;
+          if (nextState === 4) {
+            protectedState.sending = false;
+            clearTimeout(protectedState.timeoutTimer);
+          }
           xhr.dispatchEvent(makeXHREvent("readystatechange"));
         };
 
@@ -686,7 +691,8 @@ package enum ApproovWebViewJavaScriptBridge {
             },
             set(value) {
               if (protectedState.active) {
-                protectedState.timeout = Number(value) || 0;
+                protectedState.timeout = Number(value) >>> 0;
+                scheduleProtectedTimeout();
                 return;
               }
 
@@ -713,10 +719,32 @@ package enum ApproovWebViewJavaScriptBridge {
         });
 
         const cancelProtectedRequest = () => {
+          clearTimeout(protectedState.timeoutTimer);
           if (protectedState.sent && protectedState.requestId) {
             Promise.resolve(nativeHandler.postMessage({ kind: "cancel", requestId: protectedState.requestId })).catch(() => {});
           }
           protectedState.sent = false;
+        };
+
+        const scheduleProtectedTimeout = () => {
+          clearTimeout(protectedState.timeoutTimer);
+          if (!protectedState.sending || !protectedState.timeout) return;
+          const generation = protectedState.generation;
+          const remaining = protectedState.timeout - (performance.now() - protectedState.sendStarted);
+          protectedState.timeoutTimer = setTimeout(() => {
+            if (!protectedState.sending || protectedState.generation !== generation) return;
+            cancelProtectedRequest();
+            protectedState.generation += 1;
+            protectedState.status = 0;
+            protectedState.statusText = "";
+            protectedState.response = null;
+            protectedState.responseText = "";
+            protectedState.responseURL = "";
+            protectedState.responseHeaders = {};
+            changeProtectedReadyState(4);
+            xhr.dispatchEvent(makeXHREvent("timeout"));
+            xhr.dispatchEvent(makeXHREvent("loadend"));
+          }, Math.max(0, remaining));
         };
 
         xhr.open = (method, url, async = true, user = null, password = null) => {
@@ -829,6 +857,8 @@ package enum ApproovWebViewJavaScriptBridge {
             throw new DOMException("XMLHttpRequest is not opened or send is already in progress", "InvalidStateError");
           }
           protectedState.sending = true;
+          protectedState.sendStarted = performance.now();
+          scheduleProtectedTimeout();
           const generation = protectedState.generation;
           const isCurrent = () => protectedState.active && protectedState.generation === generation && !protectedState.aborted;
           const requestId = allocateRequestID();

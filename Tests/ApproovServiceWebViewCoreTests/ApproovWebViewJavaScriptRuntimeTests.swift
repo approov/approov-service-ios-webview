@@ -231,4 +231,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRTimeoutIgnoresLateReply() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); const events = [];
+            for (const type of ['timeout','load','error','loadend']) xhr.addEventListener(type, () => events.push(type));
+            xhr.open('GET', 'https://api.example.com/?delay=80'); xhr.timeout = 10;
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); await done;
+            await new Promise(resolve => setTimeout(resolve, 100));
+            return xhr.status === 0 && xhr.readyState === 4 && events.join(',') === 'timeout,loadend';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
