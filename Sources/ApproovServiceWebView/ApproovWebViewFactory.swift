@@ -116,6 +116,14 @@ public enum ApproovWebViewFactory {
         return webView
     }
 
+    /// Cancels outstanding bridge requests when a custom host closes the view.
+    /// The installation remains closed; create a new view for another session.
+    @MainActor
+    public static func invalidate(on webView: WKWebView) {
+        installation(for: webView)?.coordinator.invalidate()
+        webView.stopLoading()
+    }
+
     @MainActor
     private static func makeBaseWebView() -> WKWebView {
         let userContentController = WKUserContentController()

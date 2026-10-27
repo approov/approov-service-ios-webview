@@ -12,6 +12,7 @@ public final class ApproovWebViewContainer: UIView {
     func update(content: ApproovWebViewContent, configuration: ApproovWebViewConfiguration, onError: (Error) -> Void) {
         if currentConfigurationID == configuration.installationID,
            let currentContent, Self.sameContent(currentContent, content) { return }
+        if let webView { ApproovWebViewFactory.invalidate(on: webView) }
         webView?.removeFromSuperview()
         webView = nil
         currentContent = nil
@@ -34,6 +35,14 @@ public final class ApproovWebViewContainer: UIView {
             addSubview(label)
             onError(error)
         }
+    }
+
+    func invalidate() {
+        if let webView { ApproovWebViewFactory.invalidate(on: webView) }
+        webView?.removeFromSuperview()
+        webView = nil
+        currentContent = nil
+        currentConfigurationID = nil
     }
 
     private static func sameContent(_ lhs: ApproovWebViewContent, _ rhs: ApproovWebViewContent) -> Bool {
@@ -63,6 +72,10 @@ public struct ApproovWebView: UIViewRepresentable {
         let container = ApproovWebViewContainer()
         container.update(content: content, configuration: configuration, onError: onError)
         return container
+    }
+
+    public static func dismantleUIView(_ view: ApproovWebViewContainer, coordinator: ()) {
+        view.invalidate()
     }
 
     public func updateUIView(_ view: ApproovWebViewContainer, context: Context) {

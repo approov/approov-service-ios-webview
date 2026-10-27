@@ -122,6 +122,88 @@ final class ApproovWebViewCoordinatorTests: XCTestCase {
         withExtendedLifetime(view) {}
     }
 
+    func testCancellationUsesVerifiedOriginAndCancelsNativeTask() async throws {
+        let started = expectation(description: "native task started")
+        let cancelled = expectation(description: "native task cancelled")
+        let rejected = expectation(description: "page promise rejected once")
+        let configuration = makeConfiguration()
+        let coordinator = ApproovWebViewCoordinator(configuration: configuration) { _, _ in
+            started.fulfill()
+            do { try await Task.sleep(nanoseconds: 30_000_000_000) }
+            catch { cancelled.fulfill(); throw error }
+            return Self.response()
+        }
+        let view = try ApproovWebViewFactory.makeWebView(configuration: configuration, coordinator: coordinator)
+        let resultHandler = FixtureMessageHandler { message in
+            XCTAssertTrue((message.body as? String)?.contains("cancelled") == true)
+            rejected.fulfill()
+        }
+        view.configuration.userContentController.add(resultHandler, name: "fixtureResult")
+        let script = Self.pendingRequestScript
+        view.loadHTMLString("<script>" + script + "</script>", baseURL: URL(string: "https://app.example.com/main"))
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertFalse(coordinator.cancelRequest(withID: "pending-A", from: "https://other.example.com"))
+        XCTAssertEqual(coordinator.activeRequestCount, 1)
+        let result = try await view.callAsyncJavaScript("return await window.webkit.messageHandlers.approovBridge.postMessage({kind:'cancel', requestId:'pending-A'})", contentWorld: .page)
+        XCTAssertEqual((result as? [String: Any])?["cancelled"] as? Bool, true)
+        await fulfillment(of: [cancelled, rejected], timeout: 5)
+        XCTAssertEqual(coordinator.activeRequestCount, 0)
+        withExtendedLifetime(view) {}
+    }
+
+    func testInvalidationCancelsOutstandingRequestsAndClosesBridge() async throws {
+        let started = expectation(description: "native task started")
+        let cancelled = expectation(description: "native task cancelled on close")
+        let configuration = makeConfiguration()
+        let coordinator = ApproovWebViewCoordinator(configuration: configuration) { _, _ in
+            started.fulfill()
+            do { try await Task.sleep(nanoseconds: 30_000_000_000) }
+            catch { cancelled.fulfill(); throw error }
+            return Self.response()
+        }
+        let view = try ApproovWebViewFactory.makeWebView(configuration: configuration, coordinator: coordinator)
+        view.loadHTMLString("<script>" + Self.postMessageScript.replacingOccurrences(of: "method: 'GET'", with: "requestId: 'pending-A', method: 'GET'") + "</script>", baseURL: URL(string: "https://app.example.com/main"))
+        await fulfillment(of: [started], timeout: 5)
+        ApproovWebViewFactory.invalidate(on: view)
+        await fulfillment(of: [cancelled], timeout: 5)
+        XCTAssertEqual(coordinator.activeRequestCount, 0)
+        do {
+            _ = try await view.callAsyncJavaScript("return await window.webkit.messageHandlers.approovBridge.postMessage({kind:'cancel', requestId:'pending-A'})", contentWorld: .page)
+            XCTFail("Closed bridge must reject new messages")
+        } catch {}
+        withExtendedLifetime(view) {}
+    }
+
+    func testConcurrencyLimitRejectsAdditionalMessageBeforeExecution() async throws {
+        let started = expectation(description: "one native task started")
+        let limited = expectation(description: "second message limited")
+        let configuration = ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [],
+            allowedOrigins: ["https://app.example.com"], maximumConcurrentRequests: 1)
+        let coordinator = ApproovWebViewCoordinator(configuration: configuration) { _, _ in
+            started.fulfill()
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            return Self.response()
+        }
+        let view = try ApproovWebViewFactory.makeWebView(configuration: configuration, coordinator: coordinator)
+        let resultHandler = FixtureMessageHandler { message in
+            XCTAssertTrue((message.body as? String)?.contains("request limit") == true)
+            limited.fulfill()
+        }
+        view.configuration.userContentController.add(resultHandler, name: "fixtureResult")
+        let script = Self.postMessageScript + Self.pendingRequestScript
+        view.loadHTMLString("<script>" + script + "</script>", baseURL: URL(string: "https://app.example.com/main"))
+        await fulfillment(of: [started, limited], timeout: 5)
+        XCTAssertEqual(coordinator.activeRequestCount, 1)
+        ApproovWebViewFactory.invalidate(on: view)
+    }
+
+    private static let pendingRequestScript = """
+    window.webkit.messageHandlers.approovBridge.postMessage({
+        url: 'https://api.example.com/v1', method: 'GET', headers: {}, requestId: 'pending-A',
+        responseHandling: 'response', requestSource: 'fetch'
+    }).catch(function (error) { window.webkit.messageHandlers.fixtureResult.postMessage(String(error)); });
+    """
+
     private func makeConfiguration() -> ApproovWebViewConfiguration {
         ApproovWebViewConfiguration(approovConfig: "fixture", protectedEndpoints: [], allowedOrigins: ["https://app.example.com"])
     }

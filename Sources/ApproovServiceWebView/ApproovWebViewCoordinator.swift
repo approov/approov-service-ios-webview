@@ -18,6 +18,19 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
     private var didWarnAboutMissingOriginAllowlist = false
     typealias Execution = (ApproovWebViewProxyRequest, ApproovWebViewRequestContext) async throws -> ApproovWebViewExecutionResult
     private var executionOverride: Execution?
+    private struct RequestKey: Hashable { let origin: String; let requestID: String }
+    private struct PendingRequest {
+        let token: UUID
+        let task: Task<Void, Never>
+        let replyHandler: (Any?, String?) -> Void
+    }
+    private var pendingRequests: [RequestKey: PendingRequest] = [:]
+    private var isInvalidated = false
+    var activeRequestCount: Int { pendingRequests.count }
+
+    deinit {
+        for pending in pendingRequests.values { pending.task.cancel() }
+    }
 
     // The production initializer always uses the protected native executor.
     // Tests replace execution to inspect real WKFrameInfo without network traffic.
@@ -75,111 +88,147 @@ public final class ApproovWebViewCoordinator: NSObject, WKScriptMessageHandlerWi
         didReceive message: WKScriptMessage,
         replyHandler: @escaping (Any?, String?) -> Void
     ) {
-        guard let bodyDictionary = message.body as? [String: Any] else {
-            logger.error("Received a bridge payload that was not a dictionary")
+        guard !isInvalidated else {
+            replyHandler(nil, "The native bridge has closed.")
+            return
+        }
+        guard let body = message.body as? [String: Any] else {
             replyHandler(nil, "The WebView bridge payload was not a dictionary.")
             return
         }
-
         guard isAllowedFrame(message.frameInfo) else {
-            let origin = Self.originString(from: message.frameInfo.securityOrigin)
-            logger.error("Rejecting bridge message from a frame outside the allowed origins: \(origin)")
+            logger.error("Rejecting bridge message from a frame outside the allowed origins")
             replyHandler(nil, "This origin is not allowed to use the Approov WebView bridge.")
             return
         }
-
-        if handleDiagnosticMessage(bodyDictionary, replyHandler: replyHandler) {
+        guard let context = Self.requestContext(
+            frameURL: message.frameInfo.request.url,
+            frameOrigin: Self.originString(from: message.frameInfo.securityOrigin),
+            mainDocumentURL: webView?.url,
+            isMainFrame: message.frameInfo.isMainFrame
+        ) else {
+            replyHandler(nil, "The sending frame has no supported browser origin.")
             return
         }
-
-        guard executor != nil || executionOverride != nil else {
-            if let executorInitializationError {
-                logger.error(
-                    """
-                    Rejecting bridge message: the native executor failed to initialize: \
-                    \(executorInitializationError.localizedDescription)
-                    """
-                )
-            } else {
-                logger.error("Received bridge message before the native executor was attached")
-            }
-
-            replyHandler(
-                nil,
-                executorInitializationError?.localizedDescription
-                    ?? "The native bridge is not ready yet."
-            )
-            return
-        }
-
-        do {
-            let bodyData = try JSONSerialization.data(
-                withJSONObject: bodyDictionary,
-                options: []
-            )
-            let proxyRequest = try decoder.decode(
-                ApproovWebViewProxyRequest.self,
-                from: bodyData
-            )
-            guard let context = Self.requestContext(
-                frameURL: message.frameInfo.request.url,
-                frameOrigin: Self.originString(from: message.frameInfo.securityOrigin),
-                mainDocumentURL: webView?.url,
-                isMainFrame: message.frameInfo.isMainFrame
-            ) else {
-                replyHandler(nil, "The sending frame has no supported browser origin.")
+        if body["kind"] as? String == "cancel" {
+            guard let requestID = body["requestId"] as? String, Self.validRequestID(requestID) else {
+                replyHandler(nil, "The cancellation request ID was not valid.")
                 return
             }
-            guard proxyRequest.responseHandling != .navigation || context.isMainFrame else {
+            let cancelled = cancelRequest(withID: requestID, from: context.frameOrigin)
+            replyHandler(["cancelled": cancelled], nil)
+            return
+        }
+        if handleDiagnosticMessage(body, replyHandler: replyHandler) { return }
+        guard executor != nil || executionOverride != nil else {
+            replyHandler(nil, "The native bridge is not ready yet.")
+            return
+        }
+        guard pendingRequests.count < configuration.maximumConcurrentRequests else {
+            replyHandler(nil, "The native bridge has reached its request limit.")
+            return
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: body, options: [])
+            let request = try decoder.decode(ApproovWebViewProxyRequest.self, from: data)
+            guard request.responseHandling != .navigation || context.isMainFrame else {
                 replyHandler(nil, "Protected form navigation is supported only in the main frame.")
                 return
             }
-            logger.debug("Received bridge request: \(proxyRequest.logDescription)")
-
-            Task {
-                do {
-                    let executionResult: ApproovWebViewExecutionResult
-                    if let executionOverride {
-                        executionResult = try await executionOverride(proxyRequest, context)
-                    } else if let executor {
-                        executionResult = try await executor.execute(proxyRequest, context: context)
-                    } else {
-                        throw ApproovWebViewBridgeError.webViewUnavailable
-                    }
-
-                    switch executionResult {
-                    case let .response(proxyResponse):
-                        logger.debug(
-                            """
-                            Returning response to page: \(proxyResponse.status) \
-                            \(ApproovWebViewLogger.redactedURLForLog(proxyResponse.url)) \
-                            (\(proxyResponse.bodyBase64.count) base64 chars)
-                            """
-                        )
-                        let replyObject = try makeReplyObject(from: proxyResponse)
-                        replyHandler(replyObject, nil)
-
-                    case let .navigation(navigationLoad):
-                        logger.debug(
-                            "Applying simulated navigation for \(navigationLoad.request.logDescription)"
-                        )
-                        try await MainActor.run {
-                            try applyNavigationLoad(navigationLoad)
-                        }
-                        replyHandler(["navigationStarted": true], nil)
-                    }
-                } catch {
-                    logger.error("WebView bridge request failed: \(error.localizedDescription)")
-                    replyHandler(nil, error.localizedDescription)
-                }
+            if let requestID = request.requestId, !Self.validRequestID(requestID) {
+                replyHandler(nil, "The WebView request ID was not valid.")
+                return
             }
+            let key = RequestKey(origin: context.frameOrigin, requestID: request.requestId ?? UUID().uuidString)
+            guard pendingRequests[key] == nil else {
+                replyHandler(nil, "This WebView request ID is already active.")
+                return
+            }
+            start(request, context: context, key: key, replyHandler: replyHandler)
         } catch {
             logger.error("Failed to decode the WebView bridge payload: \(error.localizedDescription)")
-            replyHandler(
-                nil,
-                "Failed to decode the WebView request: \(error.localizedDescription)"
-            )
+            replyHandler(nil, "Failed to decode the WebView request: \(error.localizedDescription)")
         }
+    }
+
+    /// Cancels this installation permanently. Create a fresh view to reopen it.
+    public func invalidate() {
+        guard !isInvalidated else { return }
+        isInvalidated = true
+        let requests = Array(pendingRequests.values)
+        pendingRequests.removeAll()
+        for pending in requests {
+            pending.task.cancel()
+            pending.replyHandler(nil, Self.cancelledMessage)
+        }
+        executor = nil
+        executionOverride = nil
+        webView = nil
+    }
+
+    // The caller must derive origin from WKFrameInfo before reaching this method.
+    func cancelRequest(withID requestID: String, from origin: String) -> Bool {
+        let key = RequestKey(origin: origin, requestID: requestID)
+        guard let pending = pendingRequests.removeValue(forKey: key) else { return false }
+        pending.task.cancel()
+        pending.replyHandler(nil, Self.cancelledMessage)
+        return true
+    }
+
+    private static let cancelledMessage = "The protected request was cancelled."
+
+    private static func validRequestID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 128
+    }
+
+    private func start(
+        _ request: ApproovWebViewProxyRequest,
+        context: ApproovWebViewRequestContext,
+        key: RequestKey,
+        replyHandler: @escaping (Any?, String?) -> Void
+    ) {
+        let token = UUID()
+        let executor = self.executor
+        let executionOverride = self.executionOverride
+        logger.debug("Received bridge request: \(request.logDescription)")
+        // No strong coordinator or WebView reference crosses the suspension.
+        // Releasing a raw WebView therefore releases its coordinator and cancels work.
+        let task = Task { [weak self] in
+            do {
+                let result: ApproovWebViewExecutionResult
+                if let executionOverride {
+                    result = try await executionOverride(request, context)
+                } else if let executor {
+                    result = try await executor.execute(request, context: context)
+                } else {
+                    throw ApproovWebViewBridgeError.webViewUnavailable
+                }
+                try Task.checkCancellation()
+                guard let self, let pending = self.takeRequest(key, token: token) else { return }
+                do {
+                    switch result {
+                    case let .response(response):
+                        pending.replyHandler(try self.makeReplyObject(from: response), nil)
+                    case let .navigation(navigation):
+                        try self.applyNavigationLoad(navigation)
+                        pending.replyHandler(["navigationStarted": true], nil)
+                    }
+                } catch {
+                    self.logger.error("WebView bridge request failed: \(error.localizedDescription)")
+                    pending.replyHandler(nil, error.localizedDescription)
+                }
+            } catch {
+                guard let self, let pending = self.takeRequest(key, token: token) else { return }
+                self.logger.error("WebView bridge request failed: \(error.localizedDescription)")
+                pending.replyHandler(nil, error.localizedDescription)
+            }
+        }
+        pendingRequests[key] = PendingRequest(token: token, task: task, replyHandler: replyHandler)
+    }
+
+    private func takeRequest(_ key: RequestKey, token: UUID) -> PendingRequest? {
+        guard pendingRequests[key]?.token == token else { return nil }
+        return pendingRequests.removeValue(forKey: key)
     }
 
     /// Decides whether a frame is allowed to use the bridge.
