@@ -572,4 +572,28 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testProtectedXHRLifecycleMatchesNativeWebKit() async throws {
+        let view = await fixture(preScript: "window.NativeXHR = window.XMLHttpRequest;")
+        let result = try await view.callAsyncJavaScript("""
+            async function lifecycle(Constructor, url, abort) {
+                const xhr = new Constructor(); const events = []; let valid = true;
+                for (const type of ['loadstart','progress','load','abort','error','loadend']) xhr.addEventListener(type, event => {
+                    events.push(type); valid &&= event instanceof ProgressEvent;
+                    if (type === 'abort') valid &&= xhr.readyState === 4 && xhr.status === 0;
+                });
+                xhr.open('GET', url); const done = new Promise(resolve => xhr.onloadend = resolve);
+                xhr.send(); if (abort) xhr.abort(); await done;
+                return {events:events.join(','), valid, state:xhr.readyState};
+            }
+            const native = await lifecycle(window.NativeXHR, 'data:application/json,%7B%7D', false);
+            const protectedResult = await lifecycle(XMLHttpRequest, 'https://api.example.com/', false);
+            const nativeAbort = await lifecycle(window.NativeXHR, 'data:application/json,%7B%7D', true);
+            const protectedAbort = await lifecycle(XMLHttpRequest, 'https://api.example.com/?delay=80', true);
+            return native.valid && protectedResult.valid && native.events === protectedResult.events &&
+                nativeAbort.valid && protectedAbort.valid && nativeAbort.events === protectedAbort.events &&
+                nativeAbort.state === protectedAbort.state;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }
