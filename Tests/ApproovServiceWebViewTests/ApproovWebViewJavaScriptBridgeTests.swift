@@ -64,7 +64,7 @@ final class ApproovWebViewJavaScriptBridgeTests: XCTestCase {
         XCTAssertTrue(source.contains("window.__approovBridgeEnabled = true;"))
         XCTAssertTrue(source.contains("fetch: true"))
         XCTAssertTrue(source.contains("xhr: xhrBridgeEnabled"))
-        XCTAssertTrue(source.contains("forms: true"))
+        XCTAssertTrue(source.contains("forms: formBridgeEnabled"))
         XCTAssertTrue(source.contains("cookieSync: true"))
         XCTAssertTrue(source.contains("simulatedNavigations: true"))
     }

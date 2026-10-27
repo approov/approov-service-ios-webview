@@ -21,7 +21,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         view.navigationDelegate = nil
     }
 
-    private func fixture(maxRequestBodyBytes: Int = 10 * 1024 * 1024, preScript: String = "") async -> WKWebView {
+    private func fixture(maxRequestBodyBytes: Int = 10 * 1024 * 1024, formBridgeEnabled: Bool = true, preScript: String = "") async -> WKWebView {
         let controller = WKUserContentController()
         controller.addScriptMessageHandler(Reply(), contentWorld: .page, name: "bridge")
         if !preScript.isEmpty {
@@ -29,7 +29,7 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         }
         controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(
             handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
-            xhrBridgeEnabled: true, maxRequestBodyBytes: maxRequestBodyBytes), injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            xhrBridgeEnabled: true, maxRequestBodyBytes: maxRequestBodyBytes, formBridgeEnabled: formBridgeEnabled), injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
@@ -459,6 +459,17 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             const done = new Promise(resolve => form.addEventListener('approov:form-response', event => resolve(JSON.parse(event.detail.bodyText)), {once:true}));
             button.click(); form.submit(); const payload = await done;
             return payload.url === 'https://api.example.com/echo' && atob(payload.bodyBase64) === 'field=value';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testFormSwitchLeavesNativeMethodsIntact() async throws {
+        let view = await fixture(formBridgeEnabled: false, preScript: "window.savedSubmit = HTMLFormElement.prototype.submit; window.savedRequestSubmit = HTMLFormElement.prototype.requestSubmit;")
+        let result = try await view.callAsyncJavaScript("""
+            return !window.__approovBridgeFeatures.forms && window.__approovBridgeFeatures.fetch &&
+                HTMLFormElement.prototype.submit === window.savedSubmit &&
+                HTMLFormElement.prototype.requestSubmit === window.savedRequestSubmit &&
+                (await fetch('https://api.example.com/')).status === 200;
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }

@@ -13,7 +13,8 @@ package enum ApproovWebViewJavaScriptBridge {
         handlerName: String,
         protectedEndpoints: [ApproovWebViewProtectedEndpoint],
         xhrBridgeEnabled: Bool,
-        maxRequestBodyBytes: Int = 10 * 1024 * 1024
+        maxRequestBodyBytes: Int = 10 * 1024 * 1024,
+        formBridgeEnabled: Bool = true
     ) -> String {
         template
             .replacingOccurrences(of: handlerPlaceholder, with: String(decoding: try! JSONEncoder().encode(handlerName), as: UTF8.self))
@@ -26,6 +27,7 @@ package enum ApproovWebViewJavaScriptBridge {
                 with: xhrBridgeEnabled ? "true" : "false"
             )
             .replacingOccurrences(of: "__APPROOV_MAX_REQUEST_BODY_BYTES__", with: String(max(0, maxRequestBodyBytes)))
+            .replacingOccurrences(of: "__APPROOV_FORM_BRIDGE_ENABLED__", with: formBridgeEnabled ? "true" : "false")
     }
 
     private static func protectedEndpointsJSON(
@@ -50,6 +52,7 @@ package enum ApproovWebViewJavaScriptBridge {
       const nativeHandler = window.webkit?.messageHandlers?.[__APPROOV_BRIDGE_HANDLER__];
       const protectedEndpoints = __APPROOV_PROTECTED_ENDPOINTS__;
       const xhrBridgeEnabled = __APPROOV_XHR_BRIDGE_ENABLED__;
+      const formBridgeEnabled = __APPROOV_FORM_BRIDGE_ENABLED__;
       const maxRequestBodyBytes = __APPROOV_MAX_REQUEST_BODY_BYTES__;
       if (!nativeHandler || typeof nativeHandler.postMessage !== "function") {
         return;
@@ -1041,6 +1044,7 @@ package enum ApproovWebViewJavaScriptBridge {
         });
       });
 
+      if (formBridgeEnabled) {
       document.addEventListener("click", (event) => {
         const clickedElement = event.target instanceof Element
           ? event.target.closest("button, input")
@@ -1150,6 +1154,8 @@ package enum ApproovWebViewJavaScriptBridge {
         };
       }
 
+      }
+
       if (xhrBridgeEnabled) {
         window.XMLHttpRequest = ApproovXMLHttpRequest;
         window.XMLHttpRequest.prototype = OriginalXMLHttpRequest.prototype;
@@ -1158,7 +1164,7 @@ package enum ApproovWebViewJavaScriptBridge {
       window.__approovBridgeFeatures = {
         fetch: true,
         xhr: xhrBridgeEnabled,
-        forms: true,
+        forms: formBridgeEnabled,
         cookieSync: true,
         simulatedNavigations: true,
       };
