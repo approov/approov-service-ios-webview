@@ -13,12 +13,14 @@ final class ApproovWebViewHostTests: XCTestCase {
         let host = UIHostingController(
             rootView: ApproovWebView(
                 content: .htmlString("first", baseURL: nil), configuration: configuration))
-        let window = UIWindow(frame: UIScreen.main.bounds)
+        let window = try Self.makeTestWindow()
+        let previousKeyWindow = window.windowScene?.windows.first(where: \.isKeyWindow)
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
             window.isHidden = true
             window.rootViewController = nil
+            previousKeyWindow?.makeKey()
         }
         await waitUntil { Self.findContainer(in: host.view)?.webView != nil }
         let container = try XCTUnwrap(Self.findContainer(in: host.view))
@@ -46,6 +48,23 @@ final class ApproovWebViewHostTests: XCTestCase {
         await fulfillment(of: [failed], timeout: 5)
         XCTAssertNil(container.webView)
         XCTAssertEqual((container.subviews.first as? UILabel)?.text, "Unable to open this page.")
+    }
+
+    @MainActor
+    private static func makeTestWindow() throws -> UIWindow {
+        // Framework-test runners have no UIApplication. Keep their existing
+        // window path, while application-hosted tests must use a real scene.
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            return UIWindow(frame: UIScreen.main.bounds)
+        }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = try XCTUnwrap(
+            scenes.first { $0.activationState == .foregroundActive }
+                ?? scenes.first { $0.activationState == .foregroundInactive },
+            "The application-hosted SwiftUI fixture needs a foreground UIWindowScene")
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        return window
     }
 
     @MainActor

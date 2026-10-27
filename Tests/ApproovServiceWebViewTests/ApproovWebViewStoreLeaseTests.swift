@@ -9,6 +9,7 @@ import XCTest
 @MainActor
 final class ApproovWebViewStoreLeaseTests: XCTestCase {
     private static var lifetimeProbeKey: UInt8 = 0
+    private static var viewLifetimeProbeKey: UInt8 = 0
 
     func testStoreRemainsReservedAfterViewReleaseUntilCookieFlushDrains() async throws {
         let store = WKWebsiteDataStore.nonPersistent()
@@ -24,6 +25,7 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
         let releasedBridge = WeakReference(nil)
         let lease = WeakReference(nil)
         let leaseReleased = expectation(description: "store lease released after cookie work")
+        let viewReleased = expectation(description: "raw WebView deallocated after UIKit cleanup")
         let enteredFlush = expectation(description: "old cookie flush started")
         let adapter = SuspendedCookieStore(enteredFlush: enteredFlush)
         var flush: Task<Void, Never>?
@@ -33,23 +35,32 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
             coordinator = ApproovWebViewFactory.makeCoordinator(configuration: configuration)
             first = makeView(store: store, controller: retainedController)
             releasedView.value = first
+            objc_setAssociatedObject(
+                try XCTUnwrap(first), &Self.viewLifetimeProbeKey,
+                DeinitializationProbe { viewReleased.fulfill() }, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             releasedCoordinator.value = coordinator
             try ApproovWebViewFactory.install(
                 on: XCTUnwrap(first), configuration: configuration, coordinator: coordinator)
             lease.value = coordinator?.storeLifetimeOwner
             objc_setAssociatedObject(
                 try XCTUnwrap(coordinator?.storeLifetimeOwner), &Self.lifetimeProbeKey,
-                LeaseReleaseProbe { leaseReleased.fulfill() }, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                DeinitializationProbe { leaseReleased.fulfill() }, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             flush = try beginFlush(
                 owner: XCTUnwrap(coordinator?.storeLifetimeOwner), adapter: adapter, bridgeProbe: releasedBridge)
         }
         await fulfillment(of: [enteredFlush], timeout: 5)
 
-        // The raw view is gone and the retained controller still owns its handler.
-        // The old asynchronous cookie reconciliation must keep the lease reserved.
         autoreleasepool {
             first = nil
             coordinator = nil
+        }
+        // UIKit may retain the view until its current run-loop work drains.
+        // Wait for actual deallocation rather than assuming synchronous teardown.
+        await fulfillment(of: [viewReleased], timeout: 5)
+
+        // The raw view is gone and the retained controller still owns its handler.
+        // The old asynchronous cookie reconciliation must keep the lease reserved.
+        autoreleasepool {
             XCTAssertNil(releasedView.value)
             XCTAssertNotNil(releasedCoordinator.value, "The retained controller must keep its handler alive")
             XCTAssertNotNil(releasedBridge.value, "The suspended flush must retain its cookie bridge")
@@ -112,7 +123,7 @@ final class ApproovWebViewStoreLeaseTests: XCTestCase {
             lease.value = coordinator.storeLifetimeOwner
             objc_setAssociatedObject(
                 try XCTUnwrap(coordinator.storeLifetimeOwner), &Self.lifetimeProbeKey,
-                LeaseReleaseProbe { leaseReleased.fulfill() }, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                DeinitializationProbe { leaseReleased.fulfill() }, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
         first = nil
         // The old controller deliberately keeps the coordinator alive. Closing
@@ -180,7 +191,7 @@ private final class SuspendedCookieStore: ApproovWebViewCookieStoreAdapter {
     }
 }
 
-private final class LeaseReleaseProbe: NSObject {
+private final class DeinitializationProbe: NSObject {
     private let onRelease: () -> Void
     init(onRelease: @escaping () -> Void) { self.onRelease = onRelease }
     deinit { onRelease() }
