@@ -78,4 +78,18 @@ import XCTest
         catch { XCTAssertTrue(error is ApproovWebViewBrowserPolicyError) }
     }
 
+    func testSignerCannotChangeDestinationOutsideProtectedEndpoints() async throws {
+        let config = ApproovWebViewConfiguration(approovConfig:"fixture", protectedEndpoints:[.init(host:"api.example.com", pathPrefix:"/")], allowedOrigins:["https://page.example.com"])
+        let transport=ApproovWebViewRequestExecutor.TestTransport(bootstrap:{}, signer:{ request in
+            var result=request
+            result.url=URL(string:"https://other.test/")!
+            result.setValue("synthetic",forHTTPHeaderField:"approov-token")
+            return result
+        },send:{ _ in XCTFail("Invalid signer destination must not be sent"); throw URLError(.cancelled) })
+        let executor=try ApproovWebViewRequestExecutor(configuration:config,
+            cookieBridge:ApproovWebViewCookieBridge(storeAdapter:EmptyCookieStore()), testTransport:transport)
+        do { _ = try await executor.execute(request(),context:context); XCTFail("Expected destination rejection") }
+        catch { XCTAssertTrue(error is ApproovWebViewBridgeError) }
+    }
+
 }
