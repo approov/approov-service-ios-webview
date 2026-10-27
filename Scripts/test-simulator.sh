@@ -15,15 +15,17 @@ if [[ -z "$task_simulator" ]]; then
     task_simulator=$(python3 - "$task_run/devices.json" <<'PY'
 import json, re, sys
 devices = json.load(open(sys.argv[1]))['devices']
-runtimes = sorted((key for key in devices if '.iOS-' in key),
-                  key=lambda key: tuple(int(x) for x in re.findall(r'\d+', key)), reverse=True)
+def version(runtime):
+    return tuple(int(x) for x in re.findall(r'\d+', runtime))
+runtimes = sorted((key for key in devices if '.iOS-' in key and version(key) >= (17,)),
+                  key=version, reverse=True)
 for runtime in runtimes:
     phones = [x for x in devices[runtime] if x.get('isAvailable') and x['name'].startswith('iPhone')]
     if phones:
         print(phones[0]['udid'])
         break
 else:
-    raise SystemExit('No available iPhone simulator. Install an iOS runtime in Xcode.')
+    raise SystemExit('No available iPhone simulator with iOS 17 or later. Install a runtime in Xcode.')
 PY
 )
 fi
@@ -33,10 +35,13 @@ printf 'Preparing simulator %s\n' "$task_simulator"
 xcrun simctl boot "$task_simulator" 2>/dev/null || true
 xcrun simctl bootstatus "$task_simulator" -b
 task_arguments=(
-    -scheme approov-service-ios-webview
+    -project "$task_repo/Tests/SimulatorHost/WebViewTestHarness.xcodeproj"
+    -scheme WebViewHostedTests
     -destination "platform=iOS Simulator,id=$task_simulator"
     -clonedSourcePackagesDirPath "$task_packages"
     -derivedDataPath "$task_derived"
+    CODE_SIGNING_ALLOWED=YES
+    CODE_SIGN_IDENTITY=-
 )
 
 printf 'Resolving package dependencies. Log: %s/resolve.log\n' "$task_run"
@@ -44,13 +49,6 @@ xcodebuild "${task_arguments[@]}" -resolvePackageDependencies > "$task_run/resol
 printf 'Building simulator tests. Log: %s/build.log\n' "$task_run"
 xcodebuild "${task_arguments[@]}" -disableAutomaticPackageResolution -skipPackageUpdates \
     build-for-testing > "$task_run/build.log" 2>&1
-
-# SPM's binary SDK copy can lack a simulator-loadable signature. Sign only the
-# generated build product, never the dependency checkout or a distribution SDK.
-task_sdk="$task_derived/Build/Products/Debug-iphonesimulator/Approov.framework"
-if [[ -d "$task_sdk" ]]; then
-    codesign --force --sign - "$task_sdk"
-fi
 
 task_exit=0
 printf 'Running simulator tests. Log: %s/test.log\n' "$task_run"
