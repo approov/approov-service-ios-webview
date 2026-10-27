@@ -21,14 +21,14 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         view.navigationDelegate = nil
     }
 
-    private func fixture(maxRequestBodyBytes: Int = 10 * 1024 * 1024, formBridgeEnabled: Bool = true, preScript: String = "") async -> WKWebView {
+    private func fixture(maxRequestBodyBytes: Int = 10 * 1024 * 1024, formBridgeEnabled: Bool = true, preScript: String = "", protectedEndpoints: [ApproovWebViewProtectedEndpoint] = [.init(host: "api.example.com", pathPrefix: "/")]) async -> WKWebView {
         let controller = WKUserContentController()
         controller.addScriptMessageHandler(Reply(), contentWorld: .page, name: "bridge")
         if !preScript.isEmpty {
             controller.addUserScript(WKUserScript(source: preScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
         controller.addUserScript(WKUserScript(source: ApproovWebViewJavaScriptBridge.scriptSource(
-            handlerName: "bridge", protectedEndpoints: [.init(host: "api.example.com", pathPrefix: "/")],
+            handlerName: "bridge", protectedEndpoints: protectedEndpoints,
             xhrBridgeEnabled: true, maxRequestBodyBytes: maxRequestBodyBytes, formBridgeEnabled: formBridgeEnabled), injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
@@ -592,6 +592,18 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
             return native.valid && protectedResult.valid && native.events === protectedResult.events &&
                 nativeAbort.valid && protectedAbort.valid && nativeAbort.events === protectedAbort.events &&
                 nativeAbort.state === protectedAbort.state;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
+    func testCanonicalConfigurationTrimsPathPrefixAndExclusions() async throws {
+        let view = await fixture(preScript: "window.fetch = async () => new Response('browser');", protectedEndpoints: [
+            .init(host: "api.example.com", pathPrefix: "/v1/", excludedPathPrefixes: ["/v1/assets/"])
+        ])
+        let result = try await view.callAsyncJavaScript("""
+            const protectedResult = await fetch('https://api.example.com/v1/child');
+            const excluded = await fetch('https://api.example.com/v1/assets/child');
+            return await protectedResult.text() === '{}' && await excluded.text() === 'browser';
             """, arguments: [:], in: nil, contentWorld: .page)
         XCTAssertEqual(result as? Bool, true)
     }
