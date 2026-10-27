@@ -82,6 +82,9 @@ extension ApproovWebViewLogger {
         guard let url else {
             return "<nil-url>"
         }
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+            return "<non-http-url>"
+        }
 
         guard
             var components = URLComponents(

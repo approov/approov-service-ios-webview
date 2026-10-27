@@ -52,6 +52,8 @@ Retain a configuration value across ordinary SwiftUI updates.
 Create a new configuration only for an intended policy change.
 Use `onError` to connect installation failures to the host's retry interface.
 
+Debug lifecycle logging is disabled by default. Enable it explicitly for an investigation.
+
 ## Review request policies
 
 Allowed page origins and protected API destinations remain independent configuration lists.

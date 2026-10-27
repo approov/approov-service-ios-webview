@@ -235,7 +235,7 @@ public struct ApproovWebViewConfiguration: Sendable {
         usesExistingApproovService: Bool = false,
         configureApproovService: @escaping @Sendable () throws -> Void = {},
         mutateRequest: @escaping @Sendable (URLRequest) -> URLRequest = { $0 },
-        debugLoggingEnabled: Bool = true,
+        debugLoggingEnabled: Bool = false,
         loggerSubsystem: String = Bundle.main.bundleIdentifier ?? "ApproovWebView",
         loggerCategory: String = "ApproovWebViewBridge"
     ) {
