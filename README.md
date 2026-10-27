@@ -9,6 +9,7 @@ The package injects a JavaScript bridge into the page, intercepts protected `fet
 
 For an existing integration, see [migration to 0.6](Documentation/MigratingTo0.6.md).
 This branch contains the unreleased 0.6 implementation.
+See the [simulator results and ticket coverage](Documentation/Validation0.6.md) for the regression evidence.
 
 ## Requirements
 
