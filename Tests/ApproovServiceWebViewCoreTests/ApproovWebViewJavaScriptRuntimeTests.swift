@@ -307,4 +307,22 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRProgressLifecycleAndAbortStates() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); const events = []; let progress = false; let upload = false;
+            for (const type of ['loadstart','progress','load','loadend']) xhr.addEventListener(type, event => {
+                events.push(type); if (type === 'progress') progress = event instanceof ProgressEvent && event.loaded === 2;
+            });
+            xhr.upload.onload = event => upload = event instanceof ProgressEvent && event.loaded === 3;
+            xhr.open('POST','https://api.example.com/');
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send('abc'); await done;
+            const aborted = new XMLHttpRequest(); aborted.open('GET','https://api.example.com/?delay=80');
+            let abortState = 0; aborted.onabort = () => abortState = aborted.readyState;
+            aborted.send(); aborted.abort();
+            return progress && upload && events.join(',') === 'loadstart,progress,load,loadend' && abortState === 4 && aborted.readyState === 0;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

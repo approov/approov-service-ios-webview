@@ -487,11 +487,8 @@ package enum ApproovWebViewJavaScriptBridge {
         }
       };
 
-      const makeXHREvent = (type, detail = null) => {
-        const event = new Event(type);
-        event.detail = detail;
-        return event;
-      };
+      const makeXHREvent = (type, loaded = 0, total = 0, lengthComputable = false) =>
+        type === "readystatechange" ? new Event(type) : new ProgressEvent(type, { loaded, total, lengthComputable });
 
       const getXMLHttpRequestDescriptor = (propertyName) => {
         let prototype = OriginalXMLHttpRequest.prototype;
@@ -556,6 +553,8 @@ package enum ApproovWebViewJavaScriptBridge {
         }
       };
 
+      // Buffered transport reports a single progress update after completion.
+      // It does not provide incremental upload/download progress or streaming.
       // Preserve the native XHR surface for unprotected traffic and switch an
       // individual instance into synthetic mode only when it opens a protected
       // endpoint. This avoids breaking WebKit-only XHR behavior on pages that
@@ -580,6 +579,8 @@ package enum ApproovWebViewJavaScriptBridge {
           sent: false,
           timeoutTimer: null,
           sendStarted: 0,
+          uploadActive: false,
+          uploadComplete: false,
           headers: Object.create(null),
           headerValidator: null,
           method: "GET",
@@ -741,24 +742,39 @@ package enum ApproovWebViewJavaScriptBridge {
           protectedState.sent = false;
         };
 
+        const failProtectedRequest = (type) => {
+          cancelProtectedRequest();
+          const generation = ++protectedState.generation;
+          const current = () => protectedState.active && protectedState.generation === generation;
+          protectedState.status = 0;
+          protectedState.statusText = "";
+          protectedState.response = null;
+          protectedState.responseText = "";
+          protectedState.responseXML = null;
+          protectedState.responseURL = "";
+          protectedState.responseHeaders = {};
+          changeProtectedReadyState(4);
+          if (!current()) return;
+          if (protectedState.uploadActive && !protectedState.uploadComplete) {
+            protectedState.uploadComplete = true;
+            xhr.upload.dispatchEvent(makeXHREvent(type));
+            if (!current()) return;
+            xhr.upload.dispatchEvent(makeXHREvent("loadend"));
+            if (!current()) return;
+          }
+          xhr.dispatchEvent(makeXHREvent(type));
+          if (!current()) return;
+          xhr.dispatchEvent(makeXHREvent("loadend"));
+          if (type === "abort" && current()) protectedState.readyState = 0;
+        };
+
         const scheduleProtectedTimeout = () => {
           clearTimeout(protectedState.timeoutTimer);
           if (!protectedState.sending || !protectedState.timeout) return;
           const generation = protectedState.generation;
           const remaining = protectedState.timeout - (performance.now() - protectedState.sendStarted);
           protectedState.timeoutTimer = setTimeout(() => {
-            if (!protectedState.sending || protectedState.generation !== generation) return;
-            cancelProtectedRequest();
-            protectedState.generation += 1;
-            protectedState.status = 0;
-            protectedState.statusText = "";
-            protectedState.response = null;
-            protectedState.responseText = "";
-            protectedState.responseURL = "";
-            protectedState.responseHeaders = {};
-            changeProtectedReadyState(4);
-            xhr.dispatchEvent(makeXHREvent("timeout"));
-            xhr.dispatchEvent(makeXHREvent("loadend"));
+            if (protectedState.sending && protectedState.generation === generation) failProtectedRequest("timeout");
           }, Math.max(0, remaining));
         };
 
@@ -880,25 +896,22 @@ package enum ApproovWebViewJavaScriptBridge {
         }
 
         xhr.abort = () => {
-          if (!protectedState.active) {
-            nativeAbort();
-            return;
-          }
-
-          if (protectedState.readyState === 0 || protectedState.readyState === 4) {
-            return;
-          }
-
+          if (!protectedState.active) { nativeAbort(); return; }
           protectedState.aborted = true;
-          protectedState.readyState = 0;
-          protectedState.response = null;
-          protectedState.responseHeaders = {};
-          protectedState.responseText = "";
-          protectedState.responseURL = "";
-          protectedState.status = 0;
-          protectedState.statusText = "";
-          xhr.dispatchEvent(makeXHREvent("abort"));
-          xhr.dispatchEvent(makeXHREvent("loadend"));
+          if (protectedState.sending || [2, 3].includes(protectedState.readyState)) {
+            failProtectedRequest("abort");
+          } else {
+            cancelProtectedRequest();
+            protectedState.generation += 1;
+            protectedState.readyState = 0;
+            protectedState.status = 0;
+            protectedState.statusText = "";
+            protectedState.response = null;
+            protectedState.responseText = "";
+            protectedState.responseXML = null;
+            protectedState.responseHeaders = {};
+            protectedState.responseURL = "";
+          }
         };
 
         xhr.send = (body = null) => {
@@ -920,6 +933,12 @@ package enum ApproovWebViewJavaScriptBridge {
           const isCurrent = () => protectedState.active && protectedState.generation === generation && !protectedState.aborted;
           const requestId = allocateRequestID();
           protectedState.requestId = requestId;
+          protectedState.uploadActive = body != null && !["GET", "HEAD"].includes(protectedState.method);
+          protectedState.uploadComplete = false;
+          xhr.dispatchEvent(makeXHREvent("loadstart"));
+          if (!isCurrent()) return;
+          if (protectedState.uploadActive) xhr.upload.dispatchEvent(makeXHREvent("loadstart"));
+          if (!isCurrent()) return;
           void (async () => {
           try {
             const serializedBody = await serializeBody(["GET", "HEAD"].includes(protectedState.method) ? null : body);
@@ -944,35 +963,37 @@ package enum ApproovWebViewJavaScriptBridge {
               return;
             }
 
+            protectedState.sent = false;
+            if (protectedState.uploadActive) {
+              protectedState.uploadComplete = true;
+              for (const type of ["progress", "load", "loadend"]) {
+                xhr.upload.dispatchEvent(makeXHREvent(type, serializedBody.byteLength, serializedBody.byteLength, true));
+                if (!isCurrent()) return;
+              }
+            }
             protectedState.status = nativeResponse.status;
             protectedState.statusText = nativeResponse.statusText;
             protectedState.responseURL = nativeResponse.url || protectedState.url;
             protectedState.responseHeaders = Object.fromEntries(
               Object.entries(nativeResponse.headers).map(([name, value]) => [name.toLowerCase(), value]),
             );
-
-            protectedState.sent = false;
             changeProtectedReadyState(2);
             if (!isCurrent()) return;
-            changeProtectedReadyState(3);
-            if (!isCurrent()) return;
-            applyProtectedXHRResponseBody(
-              protectedState,
-              base64ToUint8Array(nativeResponse.bodyBase64),
-            );
-            changeProtectedReadyState(4);
-            if (!isCurrent()) return;
-            xhr.dispatchEvent(makeXHREvent("load"));
-            if (!isCurrent()) return;
-            xhr.dispatchEvent(makeXHREvent("loadend"));
-          } catch (error) {
-            if (!isCurrent()) {
-              return;
+            const bytes = base64ToUint8Array(nativeResponse.bodyBase64);
+            applyProtectedXHRResponseBody(protectedState, bytes);
+            if (bytes.byteLength) {
+              changeProtectedReadyState(3);
+              if (!isCurrent()) return;
+              xhr.dispatchEvent(makeXHREvent("progress", bytes.byteLength, bytes.byteLength, true));
+              if (!isCurrent()) return;
             }
-
             changeProtectedReadyState(4);
-            xhr.dispatchEvent(makeXHREvent("error", error));
-            xhr.dispatchEvent(makeXHREvent("loadend"));
+            if (!isCurrent()) return;
+            xhr.dispatchEvent(makeXHREvent("load", bytes.byteLength, bytes.byteLength, true));
+            if (!isCurrent()) return;
+            xhr.dispatchEvent(makeXHREvent("loadend", bytes.byteLength, bytes.byteLength, true));
+          } catch (error) {
+            if (isCurrent()) failProtectedRequest("error");
           }
           })();
         };
