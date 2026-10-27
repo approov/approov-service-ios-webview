@@ -34,6 +34,7 @@ final actor ApproovWebViewRequestExecutor {
     private let logger: ApproovWebViewLogger
     private let scopeID = UUID().uuidString
     private var didInitializeApproov = false
+    private var activeRequests = 0
 
     init(
         configuration: ApproovWebViewConfiguration,
@@ -65,6 +66,15 @@ final actor ApproovWebViewRequestExecutor {
     /// Executes a page-originated request natively.
     func execute(_ proxyRequest: ApproovWebViewProxyRequest, context: ApproovWebViewRequestContext) async throws -> ApproovWebViewExecutionResult {
         logger.debug("Starting native execution for \(proxyRequest.logDescription)")
+        guard activeRequests < configuration.maximumConcurrentRequests else {
+            throw URLError(.resourceUnavailable)
+        }
+        activeRequests += 1
+        defer { activeRequests -= 1 }
+        if let body = proxyRequest.bodyBase64 {
+            let maxBytes = max(0, configuration.maximumRequestBodyBytes)
+            guard body.utf8.count / 4 <= (maxBytes / 3 + 1) else { throw URLError(.dataLengthExceedsMaximum) }
+        }
         let requestContext = try makeRequestContext(from: proxyRequest, context: context)
         guard configuration.isProtectedEndpoint(requestContext.requestURL) else {
             logger.error(
@@ -108,6 +118,9 @@ final actor ApproovWebViewRequestExecutor {
             """
         )
 
+        guard data.count <= configuration.maximumResponseBodyBytes else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
         let finalURL = httpResponse.url ?? requestContext.requestURL
         let proxyResponse = ApproovWebViewProxyResponse(
             url: finalURL.absoluteString,
@@ -226,6 +239,9 @@ final actor ApproovWebViewRequestExecutor {
                 throw ApproovWebViewBridgeError.invalidRequestBody
             }
 
+            guard bodyData.count <= configuration.maximumRequestBodyBytes else {
+                throw URLError(.dataLengthExceedsMaximum)
+            }
             request.httpBody = bodyData
         }
 
