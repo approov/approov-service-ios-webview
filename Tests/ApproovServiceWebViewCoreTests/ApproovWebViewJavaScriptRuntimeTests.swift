@@ -244,4 +244,18 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRValidatesOpenArguments() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            for (const method of ['bad method', 'TRACE', 'CONNECT', 'TRACK']) {
+                const xhr = new XMLHttpRequest();
+                try { xhr.open(method, 'https://api.example.com/'); return false; }
+                catch (error) { if (!['SyntaxError','SecurityError'].includes(error.name)) return false; }
+            }
+            try { new XMLHttpRequest().open('GET','https://api.example.com/',true,'user','pass'); return false; }
+            catch (error) { return error.name === 'NotSupportedError'; }
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

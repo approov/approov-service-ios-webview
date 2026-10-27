@@ -749,6 +749,20 @@ package enum ApproovWebViewJavaScriptBridge {
 
         xhr.open = (method, url, async = true, user = null, password = null) => {
           const resolvedURL = new URL(url, window.location.href).toString();
+          const protectedURL = isProtectedEndpoint(resolvedURL);
+          if (protectedURL) {
+            // Let WebKit perform Web IDL, token and forbidden-method validation
+            // without changing the live request or sending browser traffic.
+            const validator = new OriginalXMLHttpRequest();
+            validator.open(method, resolvedURL, async, user, password);
+            if (!Boolean(async)) {
+              throw new DOMException("Synchronous XMLHttpRequest is not supported for protected endpoints.", "NotSupportedError");
+            }
+            const parsedURL = new URL(resolvedURL);
+            if (user !== null || password !== null || parsedURL.username || parsedURL.password) {
+              throw new DOMException("Protected XMLHttpRequest authentication arguments are not supported", "NotSupportedError");
+            }
+          }
 
           cancelProtectedRequest();
           protectedState.generation += 1;
@@ -756,7 +770,10 @@ package enum ApproovWebViewJavaScriptBridge {
           protectedState.sending = false;
           protectedState.active = false;
           protectedState.headers = {};
-          protectedState.method = (method || "GET").toUpperCase();
+          const methodString = String(method);
+          const normalizedMethod = methodString.toUpperCase();
+          protectedState.method = ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"].includes(normalizedMethod)
+            ? normalizedMethod : methodString;
           protectedState.overrideMimeType = null;
           protectedState.readyState = 0;
           protectedState.response = null;
@@ -771,16 +788,9 @@ package enum ApproovWebViewJavaScriptBridge {
           protectedState.withCredentials =
             getNativeXMLHttpRequestProperty(xhr, "withCredentials") || false;
 
-          if (!isProtectedEndpoint(resolvedURL)) {
+          if (!protectedURL) {
             logUnprotectedRequestBypass("xhr", resolvedURL);
             return nativeOpen(method, url, async, user, password);
-          }
-
-          if (async === false) {
-            throw new DOMException(
-              "Synchronous XMLHttpRequest is not supported for protected endpoints.",
-              "NotSupportedError",
-            );
           }
 
           protectedState.active = true;
