@@ -523,4 +523,16 @@ final class ApproovWebViewJavaScriptRuntimeTests: XCTestCase {
         XCTAssertEqual(result as? Bool, true)
     }
 
+    func testXHRPropagatesCredentialModeAndRejectsLateChanges() async throws {
+        let view = await fixture()
+        let result = try await view.callAsyncJavaScript("""
+            const xhr = new XMLHttpRequest(); xhr.open('GET','https://api.example.com/echo'); xhr.withCredentials = true;
+            const done = new Promise(resolve => xhr.onloadend = resolve); xhr.send(); let rejected = false;
+            try { xhr.withCredentials = false; } catch(error) { rejected = error.name === 'InvalidStateError'; }
+            await done; const payload = JSON.parse(xhr.responseText);
+            return rejected && payload.credentials === 'include' && payload.mode === 'cors';
+            """, arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertEqual(result as? Bool, true)
+    }
+
 }

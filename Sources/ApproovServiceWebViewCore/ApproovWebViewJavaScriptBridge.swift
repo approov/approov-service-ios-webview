@@ -409,6 +409,7 @@ package enum ApproovWebViewJavaScriptBridge {
         const request = new Request(requestURL.toString(), {
           method,
           body,
+          credentials: "include",
           headers: {
             // HTML form navigations typically expect a document response.
             Accept: responseHandling === "navigation"
@@ -417,7 +418,9 @@ package enum ApproovWebViewJavaScriptBridge {
           },
         });
 
-        return serializeRequest(request, "form", responseHandling);
+        const payload = await serializeRequest(request, "form", responseHandling);
+        payload.mode = responseHandling === "navigation" ? "navigate" : "cors";
+        return payload;
       };
 
       const isSubmitControl = (element) => {
@@ -787,6 +790,9 @@ package enum ApproovWebViewJavaScriptBridge {
             },
             set(value) {
               if (protectedState.active) {
+                if (protectedState.readyState > 1 || protectedState.sending) {
+                  throw new DOMException("withCredentials cannot be changed in this state", "InvalidStateError");
+                }
                 protectedState.withCredentials = Boolean(value);
                 return;
               }
@@ -1021,6 +1027,10 @@ package enum ApproovWebViewJavaScriptBridge {
               sourcePageURL: window.location.href,
               responseHandling: "response",
               requestSource: "xhr",
+              credentials: protectedState.withCredentials ? "include" : "same-origin",
+              mode: "cors",
+              redirect: "follow",
+              cache: "no-store",
             });
 
             if (!isCurrent()) {
