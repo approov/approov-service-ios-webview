@@ -51,6 +51,8 @@ fi
 
 task_exit=0
 xcodebuild "${task_arguments[@]}" -disableAutomaticPackageResolution -skipPackageUpdates \
+    -test-timeouts-enabled YES -default-test-execution-time-allowance 60 \
+    -maximum-test-execution-time-allowance 120 -collect-test-diagnostics never \
     -resultBundlePath "$task_run/tests.xcresult" test-without-building \
     > "$task_run/test.log" 2>&1 || task_exit=$?
 python3 - "$task_run" <<'PY'
