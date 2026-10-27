@@ -504,7 +504,7 @@ final actor ApproovWebViewRequestExecutor {
 
 /// Shares a task identifier with its completion handler without capturing a
 /// mutable local variable across concurrency domains.
-private final class ApproovWebViewTaskReference:
+final class ApproovWebViewTaskReference:
     @unchecked Sendable {
     private let lock = NSLock()
     private var storedTaskIdentifier: Int?
